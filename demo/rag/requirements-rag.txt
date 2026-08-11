@@ -1,0 +1,5 @@
+# Base project requirements already provide pypdf, scikit-learn and sentence-transformers.
+# These optional packages enable OCR fallback for scanned PDF pages.
+PyMuPDF>=1.24,<2
+pytesseract>=0.3.13,<1
+Pillow>=10,<13

@@ -66,9 +66,9 @@ def recover() -> dict:
     if changed:
         with open(MID_DIR / "rag_chunks.json", "w", encoding="utf-8") as fh:
             json.dump(chunks, fh, ensure_ascii=False)
-        emb = MID_DIR / "rag_emb.npy"
-        if emb.exists():
-            emb.unlink()
+        for emb in (MID_DIR / "rag_emb.npy", MID_DIR / "rag_emb.meta.json"):
+            if emb.exists():
+                emb.unlink()
 
     BROKEN_JSON.write_text(json.dumps(broken, ensure_ascii=False, indent=1),
                            encoding="utf-8")
