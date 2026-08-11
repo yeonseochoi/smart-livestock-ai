@@ -1,0 +1,176 @@
+{
+  "s0_s1": {
+    "complaints": 12422,
+    "weather": 57695,
+    "label_rows": 19227,
+    "pos_rate": 0.1311
+  },
+  "s4_dummy": {
+    "n_upsert": 25,
+    "model": "dummy(random.uniform)"
+  },
+  "s6_rag": {
+    "hit_rate": 0.5,
+    "n": 8,
+    "refusal_ok": true,
+    "details": [
+      {
+        "q": "악취배출시설 1차 위반 시 과태료는 얼마인가",
+        "hit": true,
+        "top1": "악취방지법 시행령(대통령령)(제35804호)(20251001)/[별표 2] 과태료의 부과기준(제10"
+      },
+      {
+        "q": "악취 배출허용기준은 어디에 규정되어 있나",
+        "hit": false,
+        "top1": "축산악취 관리 지침서/제1장  악취 제거의 기본 9"
+      },
+      {
+        "q": "가축분뇨 처리시설의 설치 기준",
+        "hit": false,
+        "top1": "인쇄 _ 국가법령정보센터/차. 가축을 이동시키거나 출하하는 경우에는 분뇨 등 오염물이 가축에 묻어"
+      },
+      {
+        "q": "악취 민원 현장조사 후 개선명령 절차",
+        "hit": true,
+        "top1": "악취방지법 시행규칙(기후에너지환경부령)(제00042호)(20260622)/[별표 10] 위임업무 보고사항(제2"
+      },
+      {
+        "q": "돼지 축사 악취저감시설 운영 방법",
+        "hit": false,
+        "top1": "축산악취 관리 지침서/제1장  양  돈 29"
+      },
+      {
+        "q": "액비 살포 시 준수사항",
+        "hit": true,
+        "top1": "축산악취 관리 지침서/제1장  양  돈 41"
+      },
+      {
+        "q": "악취방지계획 수립 의무는 누구에게 있나",
+        "hit": true,
+        "top1": "악취방지법(법률)(제21065호)(20251001)/제3조"
+      },
+      {
+        "q": "익산시 악취 저감 조례상 지원 사업",
+        "hit": false,
+        "top1": "익산시 악취방지 및 저감 조례(전북특별자치도 익산시조례)(제2618호)(20250402)/서문"
+      }
+    ]
+  },
+  "s3_model": {
+    "split": {
+      "train": 14616,
+      "valid": 2915,
+      "test": 1696
+    },
+    "full_valid": {
+      "pr_auc": 0.4279,
+      "weekly_hit": 0.46,
+      "pos_rate": 0.1581
+    },
+    "full_test": {
+      "pr_auc": 0.3001,
+      "weekly_hit": 0.4765,
+      "pos_rate": 0.1103
+    },
+    "full_binary_valid": {
+      "pr_auc": 0.4223,
+      "weekly_hit": 0.4403,
+      "pos_rate": 0.1581
+    },
+    "full_binary_test": {
+      "pr_auc": 0.3045,
+      "weekly_hit": 0.4674,
+      "pos_rate": 0.1103
+    },
+    "reduced_valid": {
+      "pr_auc": 0.3798,
+      "weekly_hit": 0.4282,
+      "pos_rate": 0.1581
+    },
+    "reduced_test": {
+      "pr_auc": 0.2677,
+      "weekly_hit": 0.4439,
+      "pos_rate": 0.1103
+    },
+    "logit_valid": {
+      "pr_auc": 0.3845,
+      "weekly_hit": 0.4373
+    },
+    "logit_test": {
+      "pr_auc": 0.2525,
+      "weekly_hit": 0.389
+    },
+    "grade_cuts": {
+      "risk": 0.6573,
+      "watch": 0.2965
+    },
+    "shap_top5": [
+      "temp",
+      "block",
+      "wd_sin",
+      "month_sin",
+      "wd_cos"
+    ]
+  },
+  "s8_1": {
+    "cond": 0.22203742203742205,
+    "else": 0.11805968374747354,
+    "ratio": 1.880721809422716
+  },
+  "s8_2": {
+    "diff_pos": 85.91497956516454,
+    "diff_neg": 99.08780376274302,
+    "expected_vec": 65.0811955011281
+  },
+  "s8_3": {
+    "median_km": 7.087336832869563,
+    "within_8km": 0.6034513751572892
+  },
+  "s7_notify": {
+    "n_receptors": 240,
+    "n_targets": 108,
+    "n_by_factor": 108,
+    "n_by_sector": 0,
+    "half_angle": 12.886439392488684,
+    "wind_to": 110.0,
+    "stability": "C"
+  },
+  "s8_4": {
+    "hit": 0.025330396475770924,
+    "placebo": 0.01762114537444934,
+    "n": 1816
+  },
+  "s4_real": {
+    "n_upsert": 57,
+    "model": "full 25블록 + reduced 32블록"
+  },
+  "s5_recommend": {
+    "work_type": "액비살포",
+    "storage_days": 12,
+    "storage_factor": 1.0,
+    "recommended": {
+      "t": "2026-08-12 03시",
+      "final": 0.2872,
+      "grade": "낮음",
+      "plume_bumped": false,
+      "plume_note": "참고: 풍하측 민가 103동 (미검증 모델 — 등급 반영 안 함. S8-4 재검증 후 활성화)"
+    },
+    "avoid": {
+      "t": "2026-08-11 18시",
+      "final": 1.2506,
+      "grade": "위험"
+    },
+    "n_candidates": 55,
+    "emission_kg": 3.789,
+    "emission_note": "20.0톤 표면살포 기준 NH3 배출량 (legacy/emission.py)"
+  },
+  "s8_5": {
+    "test_mean": 0.4765459450943322,
+    "n_weeks": 84
+  },
+  "s8_6": {
+    "chamber": "2",
+    "max_delta": 2.33
+  },
+  "legacy_hash_ok": true
+}

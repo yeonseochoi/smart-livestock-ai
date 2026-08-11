@@ -1,0 +1,155 @@
+{
+  "diag14": {
+    "haversine_seoul_busan_km": 325.1,
+    "deg_lat_km": 111.2,
+    "deg_lon_km": 91.1,
+    "subset": {
+      "전체_정제후": 12422,
+      "익산_가축분뇨": 5563,
+      "2025이하(AWS맞춤)": 5275
+    },
+    "heungam": {
+      "n": 719,
+      "median": [
+        35.968937,
+        127.09091
+      ],
+      "std_lat_m": 109.1,
+      "std_lon_m": 91.4,
+      "within_3km_of_own_median": 719
+    },
+    "n_within_구좌표(35.977,127.055)[C]": {
+      "3km": 10,
+      "8km": 3208
+    },
+    "n_within_흥암리 중앙값(제공)": {
+      "3km": 130,
+      "8km": 622
+    },
+    "coord_gap_km": 3.35,
+    "verdict_unit_ok": true,
+    "verdict_order_ok": true
+  },
+  "s8_2_fixed": {
+    "diff_pos": 81.99327028445713,
+    "diff_neg": 100.24752050934819,
+    "expected_vec": 76.29214576616693
+  },
+  "s8_3_fixed": {
+    "median_km": 10.011613330038474,
+    "within_8km": 0.22775480855653424
+  },
+  "s8_4_fixed": {
+    "hit": 0.03380281690140845,
+    "placebo": 0.04507042253521127,
+    "n": 355
+  },
+  "exp9_fixed": {
+    "3km": {
+      "jeonju_146": {
+        "n": 130,
+        "hit": 0.0308,
+        "placebo": 0.0385,
+        "lift": 0.8,
+        "median_angle_off": 104.3,
+        "downwind_rate": 0.4
+      },
+      "iksan_702": {
+        "n": 126,
+        "hit": 0.0397,
+        "placebo": 0.0238,
+        "lift": 1.67,
+        "median_angle_off": 91.0,
+        "downwind_rate": 0.4921
+      }
+    },
+    "5km": {
+      "jeonju_146": {
+        "n": 149,
+        "hit": 0.0336,
+        "placebo": 0.0336,
+        "lift": 1.0,
+        "median_angle_off": 103.9,
+        "downwind_rate": 0.396
+      },
+      "iksan_702": {
+        "n": 145,
+        "hit": 0.0414,
+        "placebo": 0.0207,
+        "lift": 2.0,
+        "median_angle_off": 89.9,
+        "downwind_rate": 0.5034
+      }
+    },
+    "8km": {
+      "jeonju_146": {
+        "n": 622,
+        "hit": 0.0273,
+        "placebo": 0.037,
+        "lift": 0.74,
+        "median_angle_off": 78.1,
+        "downwind_rate": 0.5691
+      },
+      "iksan_702": {
+        "n": 614,
+        "hit": 0.0407,
+        "placebo": 0.0749,
+        "lift": 0.54,
+        "median_angle_off": 70.0,
+        "downwind_rate": 0.6678
+      }
+    },
+    "judged_at": "3km"
+  },
+  "plume_judge_fixed": {
+    "judged_at": "3km",
+    "c1_direction": false,
+    "c2_lift": true,
+    "c3_improves_over_jeonju": true,
+    "passed": false
+  },
+  "multi_demo": {
+    "n": 126,
+    "n_sources": 1,
+    "radius_km": 3.0,
+    "wind": "aws",
+    "hit": 0.0397,
+    "placebo": 0.0238,
+    "lift": 1.67,
+    "median_angle_off": 91.0,
+    "downwind_rate": 0.4921,
+    "near_warn_share": 0.8968,
+    "per_source_csv": "C:\\Users\\dogun\\Downloads\\Desktop\\Desktop\\Desktop\\Desktop\\김건도\\비타민\\2026 여름방학 1차 프로젝트\\demo\\out\\plume_multi_results.csv"
+  },
+  "annex_broken": 9,
+  "kma_mid": {
+    "land_reg": "11F10000",
+    "ta_reg": "11F10201",
+    "tmfc_now": "202608100600",
+    "live": false
+  },
+  "scheduler_once_ok": true,
+  "metrics": {
+    "full_test2026": {
+      "pr_auc": 0.3001,
+      "roc_auc": 0.7109,
+      "pos_rate": 0.1103
+    },
+    "lift_capture_at_20pct": 0.5486
+  },
+  "aws_ml": {
+    "n_common_blocks": 17470,
+    "jeonju_146": {
+      "pr_auc": 0.315,
+      "roc_auc": 0.7702,
+      "weekly_hit": 0.4015,
+      "split": "train 11,666 / es-valid 2,900 / test(2025.1~7) 1,696"
+    },
+    "iksan_702_aws": {
+      "pr_auc": 0.316,
+      "roc_auc": 0.7748,
+      "weekly_hit": 0.4477,
+      "split": "train 11,666 / es-valid 2,900 / test(2025.1~7) 1,696"
+    }
+  }
+}
