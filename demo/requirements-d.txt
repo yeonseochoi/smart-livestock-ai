@@ -1,0 +1,6 @@
+# D 파트(Streamlit + 선택적 OpenAI 설명 생성) 단독 실행 의존성.
+# A/B/C 전체 재현이 필요할 때만 별도로 requirements.txt도 설치한다.
+
+streamlit>=1.51,<2
+pydeck>=0.9,<1
+openai>=1.66
