@@ -1,27 +1,35 @@
-"""S6 — RAG 인제스트: PDF 14종 → 조문/소제목 단위 청크 + 메타데이터.
+"""PDF ingestion for the livestock-odour RAG index.
 
-계획서는 임베딩+Chroma 를 지정했지만 데모 환경에 Chroma·임베딩 모델이 없어
-TF-IDF(문자 n-gram) 검색으로 대체한다 — 청킹 원칙(조문 단위, 별표 통청크,
-고정 길이 금지)은 그대로 지킨다. 대체 사실은 validation_report 에 명시.
+Text PDFs are read with pypdf. Pages with too little embedded text optionally
+fall back to OCR (PyMuPDF + pytesseract). Chunks retain page ranges and stable
+IDs so citations and embedding caches can be validated.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from collections import Counter
+from pathlib import Path
 
 from pypdf import PdfReader
 
-from config import RAG_PDF_DIR, MID_DIR, PROV, finding
+from config import MID_DIR, OUT_DIR, PROV, RAG_PDF_DIR, finding
 
-# 법령류(조문 단위 청킹) 판별 키워드
 LAW_HINT = ("법률", "시행령", "시행규칙", "조례")
-ARTICLE_RE = re.compile(r"(?=\n\s*제\s*\d+\s*조(?:의\s*\d+)?\s*[(\[])")
-ANNEX_RE = re.compile(r"(?=\n\s*\[?별표\s*\d*\]?)")
+# Anchoring at the beginning of a line is essential: references such as
+# "제7조에 따라" inside an article must not start a new chunk.
+ARTICLE_RE = re.compile(
+    r"(?m)(?=^\s*제\s*\d+\s*조(?:의\s*\d+)?(?![가-힣\d])\s*(?:\([^)]*\))?)"
+)
+ANNEX_RE = re.compile(r"(?m)(?=^\s*\[?별표\s*\d+(?:의\s*\d+)?\]?)")
+HEADING_RE = re.compile(
+    r"^\s*(제\s*\d+\s*[장절]|\d+(?:\.\d+)*[.)]\s+|[가-하][.)]\s+|[①-⑳]\s*)"
+)
+SPACE_RE = re.compile(r"[ \t\u00a0]+")
 
 
 def doc_hierarchy(doc: str) -> str:
-    """법령 위계 분류 (v3 지시 12). 시행규칙→시행령→법률 순으로 검사
-    (문서명에 '법률'과 '시행령'이 같이 들어가므로 구체적인 것 먼저)."""
     if "시행규칙" in doc:
         return "시행규칙"
     if "시행령" in doc:
@@ -33,108 +41,173 @@ def doc_hierarchy(doc: str) -> str:
     return "매뉴얼"
 
 
-def _extract(pdf_path) -> list[tuple[int, str]]:
+def _clean_text(text: str) -> str:
+    text = text.replace("\x00", "").replace("\r", "\n")
+    text = re.sub(r"(?<=\S)-\n(?=[가-힣A-Za-z])", "", text)
+    lines = [SPACE_RE.sub(" ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _ocr_page(pdf_path: Path, page_index: int, lang: str) -> str:
+    """OCR one page when optional OCR packages and Tesseract are available."""
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+    try:
+        with fitz.open(pdf_path) as doc:
+            pix = doc[page_index].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        return pytesseract.image_to_string(image, lang=lang, config="--psm 6")
+    except Exception as exc:
+        print(f"  [OCR 실패] {pdf_path.name} p.{page_index + 1}: {exc}")
+        return ""
+
+
+def extract_pages(pdf_path: Path, ocr: bool = True, ocr_lang: str = "kor+eng") -> tuple[list[dict], int]:
     reader = PdfReader(str(pdf_path))
-    pages = []
-    for i, p in enumerate(reader.pages):
+    pages: list[dict] = []
+    ocr_count = 0
+    for i, page in enumerate(reader.pages):
         try:
-            pages.append((i + 1, p.extract_text() or ""))
+            text = _clean_text(page.extract_text() or "")
         except Exception:
-            pages.append((i + 1, ""))
-    return pages
+            text = ""
+        source = "text"
+        if ocr and len(re.sub(r"\s", "", text)) < 80:
+            recovered = _clean_text(_ocr_page(pdf_path, i, ocr_lang))
+            if len(recovered) > len(text):
+                text, source, ocr_count = recovered, "ocr", ocr_count + 1
+        pages.append({"page": i + 1, "text": text, "source": source})
+    return pages, ocr_count
 
 
-def _chunk_law(full: str, doc: str) -> list[dict]:
-    """조문 단위 분리, 별표는 통째로 1청크."""
-    # 별표를 먼저 떼어낸다
-    parts = ANNEX_RE.split(full)
+def _page_for_offset(page_spans: list[tuple[int, int, int]], offset: int) -> int:
+    for start, end, page in page_spans:
+        if start <= offset < end:
+            return page
+    return page_spans[-1][2] if page_spans else 1
+
+
+def _chunk_law(pages: list[dict], doc: str) -> list[dict]:
+    full_parts, spans, cursor = [], [], 0
+    for p in pages:
+        text = p["text"]
+        full_parts.append(text)
+        spans.append((cursor, cursor + len(text) + 1, p["page"]))
+        cursor += len(text) + 1
+    full = "\n".join(full_parts)
+    starts = sorted(set([0] + [m.start() for m in ARTICLE_RE.finditer(full)]
+                        + [m.start() for m in ANNEX_RE.finditer(full)]))
     chunks = []
-    for part in parts:
-        head = part.strip()[:20]
-        if head.startswith("별표") or head.startswith("[별표"):
-            chunks.append({"doc": doc, "unit": head.split("\n")[0][:30],
-                           "text": part.strip()})
+    for pos, end in zip(starts, starts[1:] + [len(full)]):
+        text = full[pos:end].strip()
+        if len(text) < 40:
             continue
-        for art in ARTICLE_RE.split(part):
-            art = art.strip()
-            if len(art) < 30:
-                continue
-            m = re.match(r"제\s*\d+\s*조(?:의\s*\d+)?", art)
-            chunks.append({"doc": doc, "unit": m.group(0) if m else "서문",
-                           "text": art})
+        first = text.splitlines()[0].strip()[:80]
+        am = re.match(r"제\s*\d+\s*조(?:의\s*\d+)?", first)
+        xm = re.match(r"\[?별표\s*\d+(?:의\s*\d+)?\]?", first)
+        unit = (xm or am).group(0) if (xm or am) else "서문"
+        chunks.append({"doc": doc, "unit": unit, "text": text,
+                       "page": _page_for_offset(spans, pos),
+                       "page_end": _page_for_offset(spans, max(pos, end - 1))})
     return chunks
 
 
-def _chunk_manual(pages: list[tuple[int, str]], doc: str) -> list[dict]:
-    """매뉴얼: 소제목(숫자. / 제N장·절 / 가나다.) 단위, 실패 시 페이지 단위."""
-    chunks = []
-    buf, unit, start_page = [], "서문", 1
-    head_re = re.compile(r"^\s*(제\s*\d+\s*[장절]|[0-9]+(\.[0-9]+)*[.)]\s|[가-하][.)]\s)")
-    for pno, text in pages:
-        for line in text.split("\n"):
-            if head_re.match(line) and len(line.strip()) < 60:
-                if buf and len("\n".join(buf)) > 80:
-                    chunks.append({"doc": doc, "unit": unit, "page": start_page,
-                                   "text": "\n".join(buf)})
-                buf, unit, start_page = [], line.strip()[:40], pno
+def _chunk_manual(pages: list[dict], doc: str) -> list[dict]:
+    chunks, buf = [], []
+    unit, start_page, end_page = "서문", 1, 1
+
+    def flush() -> None:
+        nonlocal buf
+        text = "\n".join(buf).strip()
+        if len(text) >= 80:
+            chunks.append({"doc": doc, "unit": unit, "page": start_page,
+                           "page_end": end_page, "text": text})
+        buf = []
+
+    for p in pages:
+        for line in p["text"].splitlines():
+            if HEADING_RE.match(line) and len(line) <= 100:
+                flush()
+                unit, start_page = line[:80], p["page"]
             buf.append(line)
-    if buf:
-        chunks.append({"doc": doc, "unit": unit, "page": start_page,
-                       "text": "\n".join(buf)})
+            end_page = p["page"]
+            if len("\n".join(buf)) >= 2200:
+                flush()
+                unit, start_page = f"{unit} (계속)", p["page"]
+    flush()
     return chunks
 
 
-def run() -> list[dict]:
+def _finalize(chunks: list[dict]) -> list[dict]:
+    result, seen = [], set()
+    for chunk in chunks:
+        text = _clean_text(chunk["text"])
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if len(text) < 40 or digest in seen:
+            continue
+        seen.add(digest)
+        chunk["text"] = text
+        chunk["hier"] = doc_hierarchy(chunk["doc"])
+        chunk["is_annex"] = bool(re.match(r"\[?별표", chunk["unit"]))
+        chunk["id"] = hashlib.sha1(
+            f"{chunk['doc']}|{chunk['unit']}|{chunk.get('page')}|{digest}".encode("utf-8")
+        ).hexdigest()[:16]
+        result.append(chunk)
+    return result
+
+
+def run(ocr: bool = True, ocr_lang: str = "kor+eng") -> list[dict]:
+    MID_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     pdfs = sorted(RAG_PDF_DIR.glob("*.pdf"))
     PROV.log("D6 법령·매뉴얼 PDF", RAG_PDF_DIR, real=True, note=f"{len(pdfs)}종")
-
-    all_chunks: list[dict] = []
-    empty_docs = []
+    all_chunks, docs, empty_docs, total_ocr = [], [], [], 0
     for pdf in pdfs:
-        doc = pdf.stem
-        pages = _extract(pdf)
-        full = "\n".join(t for _, t in pages)
-        if len(full.strip()) < 200:
-            empty_docs.append(doc)
+        pages, ocr_count = extract_pages(pdf, ocr=ocr, ocr_lang=ocr_lang)
+        total_ocr += ocr_count
+        char_count = sum(len(p["text"]) for p in pages)
+        if char_count < 200:
+            empty_docs.append(pdf.stem)
+            docs.append({"doc": pdf.stem, "pages": len(pages), "chars": char_count,
+                         "chunks": 0, "ocr_pages": ocr_count, "status": "unreadable"})
             continue
-        if any(h in doc for h in LAW_HINT):
-            cs = _chunk_law(full, doc)
-        else:
-            cs = _chunk_manual(pages, doc)
-        # 너무 긴 청크(추출 실패로 통짜가 된 경우)는 별표가 아니면 3000자에서 분할
-        fixed = []
-        for c in cs:
-            if len(c["text"]) > 3000 and not c["unit"].startswith(("별표", "[별표")):
-                for i in range(0, len(c["text"]), 3000):
-                    fixed.append({**c, "unit": f"{c['unit']}#{i//3000}",
-                                  "text": c["text"][i:i + 3000]})
-            else:
-                fixed.append(c)
-        all_chunks.extend(fixed)
+        chunks = (_chunk_law(pages, pdf.stem) if any(h in pdf.stem for h in LAW_HINT)
+                  else _chunk_manual(pages, pdf.stem))
+        chunks = _finalize(chunks)
+        all_chunks.extend(chunks)
+        docs.append({"doc": pdf.stem, "pages": len(pages), "chars": char_count,
+                     "chunks": len(chunks), "ocr_pages": ocr_count, "status": "ok"})
 
+    all_chunks = _finalize(all_chunks)
+    index_path = MID_DIR / "rag_chunks.json"
+    index_path.write_text(json.dumps(all_chunks, ensure_ascii=False, indent=1), encoding="utf-8")
+    fingerprint = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    manifest = {"schema_version": 2, "fingerprint": fingerprint,
+                "pdf_count": len(pdfs), "chunk_count": len(all_chunks),
+                "ocr_pages": total_ocr, "documents": docs}
+    (MID_DIR / "rag_manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Any new chunk set invalidates old embeddings.
+    for path in (MID_DIR / "rag_emb.npy", MID_DIR / "rag_emb.meta.json"):
+        if path.exists():
+            path.unlink()
+    broken = [{"doc": c["doc"], "unit": c["unit"]} for c in all_chunks
+              if c["is_annex"] and len(c["text"]) < 300]
+    (MID_DIR / "broken_annex.json").write_text(
+        json.dumps(broken, ensure_ascii=False, indent=1), encoding="utf-8")
+    report = [f"읽기 실패 문서: {d}" for d in empty_docs]
+    report += [f"짧은 별표: {b['doc']} / {b['unit']}" for b in broken]
+    (OUT_DIR / "rag_redownload_list.txt").write_text("\n".join(report) or "(없음)", encoding="utf-8")
     if empty_docs:
-        finding(f"PDF 텍스트 추출 실패(스캔본 추정) {len(empty_docs)}종: "
-                + ", ".join(empty_docs) + " — RAG 검색 범위에서 빠짐. OCR 필요")
-
-    # v3 지시 12: 위계 메타데이터 + 별표 여부 필드
-    for c in all_chunks:
-        c["hier"] = doc_hierarchy(c["doc"])
-        c["is_annex"] = c["unit"].startswith(("별표", "[별표"))
-
-    # 별표 추출이 깨진 항목(본문 300자 미만) → "재다운로드 필요 목록"
-    broken = [f"{c['doc']} / {c['unit']} ({len(c['text'])}자)"
-              for c in all_chunks if c["is_annex"] and len(c["text"]) < 300]
-    redownload = broken + [f"{d} (스캔본 — 텍스트 추출 불가, OCR 또는 원문 재확보)"
-                           for d in empty_docs]
-    from config import OUT_DIR
-    (OUT_DIR / "rag_redownload_list.txt").write_text(
-        "\n".join(redownload) or "(없음)", encoding="utf-8")
-    if redownload:
-        print(f"  [DOC 재다운로드 필요] {len(redownload)}건 → out/rag_redownload_list.txt")
-        for line in redownload[:5]:
-            print(f"    - {line}")
-
-    with open(MID_DIR / "rag_chunks.json", "w", encoding="utf-8") as fh:
-        json.dump(all_chunks, fh, ensure_ascii=False)
-    print(f"  청크 {len(all_chunks):,}개 생성 (문서 {len(pdfs) - len(empty_docs)}/{len(pdfs)}종)")
+        finding("OCR 후에도 읽지 못한 문서: " + ", ".join(empty_docs))
+    print(f"  청크 {len(all_chunks):,}개 / 문서 {len(pdfs)-len(empty_docs)}/{len(pdfs)}종 / OCR {total_ocr}쪽")
     return all_chunks
+
+
+if __name__ == "__main__":
+    run()

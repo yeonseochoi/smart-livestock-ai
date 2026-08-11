@@ -83,9 +83,9 @@ def reingest(src_path: Path) -> None:
                      "hier": "시행령", "is_annex": True})
     with open(MID_DIR / "rag_chunks.json", "w", encoding="utf-8") as fh:
         json.dump(kept, fh, ensure_ascii=False)
-    emb = MID_DIR / "rag_emb.npy"
-    if emb.exists():
-        emb.unlink()  # 청크 수 변경 → 캐시 무효화
+    for emb in (MID_DIR / "rag_emb.npy", MID_DIR / "rag_emb.meta.json"):
+        if emb.exists():
+            emb.unlink()  # 청크 수 변경 → 캐시 무효화
     print(f"  별표 {len(annex_parts)}건 재청킹 완료, 임베딩 캐시 무효화")
 
     # 재측정: QA30 + ANNEX_QA
