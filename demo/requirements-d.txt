@@ -1,0 +1,4 @@
+# D 에이전트 Streamlit 시연의 추가 의존성. A/B/C 전체 의존성은 requirements.txt.
+streamlit>=1.51,<2
+pydeck>=0.9,<1
+openai>=1.66
