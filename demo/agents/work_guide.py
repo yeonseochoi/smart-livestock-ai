@@ -28,7 +28,7 @@ def _offline_guide(tools: LocalTools, farm_id: str, work_type: str) -> str:
                            if work_type in ("분뇨제거", "청소", "환기점검", "저감시설점검")
                            else None)
     if not cal:
-        return "risk_calendar 가 비어 있습니다. run_daily 를 먼저 실행하세요."
+        return "risk_calendar 가 비어 있습니다. run_serve.py 를 먼저 실행하세요."
 
     ranked = sorted(cal, key=lambda c: c["final"])  # 동률이면 이른 시각(정렬 안정성)
     best, alt = ranked[0], (ranked[1] if len(ranked) > 1 else ranked[0])

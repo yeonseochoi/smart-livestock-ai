@@ -98,12 +98,12 @@ def step6_agents(rag_index, c, w):
 def step7_integrate(c=None):
     section("⑦ S5 — 통합: 실모델 교체 → 작업 창 추천 + S8-5 백테스트")
     from ops import daily_scoring
-    from scoring import s5_recommend
+    from scoring import recommend
     from analysis import figures
 
     RESULTS["s4_real"] = daily_scoring.run(dummy=False)
 
-    rec = s5_recommend.recommend("액비살포", storage_days=12, tons=20.0,
+    rec = recommend.recommend("액비살포", storage_days=12, tons=20.0,
                                  method="표면살포")
     print(f"  [추천] {rec['recommended']['t']} final {rec['recommended']['final']}"
           f" 등급 {rec['recommended']['grade']}"
@@ -113,7 +113,7 @@ def step7_integrate(c=None):
     print(f"  [회피] {rec['avoid']['t']} final {rec['avoid']['final']}")
     if "emission_kg" in rec:
         print(f"  [배출] {rec['emission_kg']} kg NH3 — {rec['emission_note']}")
-    RESULTS["s5_recommend"] = rec
+    RESULTS["recommend"] = rec
 
     RESULTS["s8_5"] = figures.s8_5_backtest()
     RESULTS["s8_6"] = figures.s8_6_sensor()
@@ -162,7 +162,7 @@ def write_report():
 | ④ S2~S3 | full test PR-AUC {g('s3_model', 'full_test', 'pr_auc')}, 주간 적중률 {g('s3_model', 'full_test', 'weekly_hit')} | 실행됨 |
 | ⑤ S8-1~3 | 야간·무풍·고습 배율 x{g('s8_1', 'ratio', default=0):.2f} 등 그래프 3장 | 실행됨 |
 | ⑥ S7+S8-4 | 에이전트 2종 + 플룸 적중 {g('s8_4', 'hit', default=0):.3f} (플라시보 {g('s8_4', 'placebo', default=0):.3f}) | 실행됨 |
-| ⑦ S5+S8-5 | 실모델 교체 + 추천 {g('s5_recommend', 'recommended', 't')} | 실행됨 |
+| ⑦ S5+S8-5 | 실모델 교체 + 추천 {g('recommend', 'recommended', 't')} | 실행됨 |
 
 ### 모델 성능 (시계열 분할: train 20~24 / valid 25 / test 26.1~7)
 
@@ -245,7 +245,7 @@ def write_report():
 ## 5. 절대 규칙 준수 확인
 
 - **규칙 1 (곱셈 금지)**: S5 는 플룸 factor 를 final 에 곱하지 않는다.
-  `s5_recommend.py` 의 보정은 등급 1단계 상향(이산)뿐이다.
+  `recommend.py` 의 보정은 등급 1단계 상향(이산)뿐이다.
 - **규칙 2 (서빙 피처 철칙)**: FULL/REDUCED_FEATURES 에 NH3·CO2·방향성 피처 없음.
   센서 데이터는 S8-6 그래프에만 사용.
 - **규칙 3 (legacy 수정 금지)**: `demo/legacy/` 는 원본 사본이며 import 만 했다.

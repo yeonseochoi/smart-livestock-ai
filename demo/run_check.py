@@ -117,8 +117,8 @@ for c in ["up_ik_pig", "up_gj_pig", "calm_streak", "ws_lag1"]:
         f"학습 [{lo:.1f}~{hi:.1f}] · 서빙 [{b[c].min():.1f}~{b[c].max():.1f}]")
 
 print("\n" + "=" * 78); print(" 7. 추천"); print("=" * 78)
-from scoring import s5_recommend
-r = s5_recommend.recommend_v6("액비살포", storage_days=12, species="돼지")
+from scoring import recommend
+r = recommend.recommend_v6("액비살포", storage_days=12, species="돼지")
 chk("추천 산출", "recommended" in r, r["recommended"]["t"])
 chk("회피 시각이 추천보다 위험", r["avoid"]["final"] > r["recommended"]["final"])
 chk("6시간 창 후보 존재", r["n_candidates"] > 0, f"{r['n_candidates']}개")
@@ -131,7 +131,7 @@ chk("플룸이 그룹을 좁힌 시각 존재", r["plume_selected_hours"] > 0,
     f"{r['plume_selected_hours']}/{r['n_candidates']}")
 chk("플룸 판정 방법 기록", "plume_method" in r["recommended"],
     r["recommended"]["plume_method"])
-r2 = s5_recommend.recommend_v6("청소", species="육계")
+r2 = recommend.recommend_v6("청소", species="육계")
 chk("육계에는 액상공법 조언 없음", not any("주입식" in t for t in r2["reduction_tips"]),
     str(r2["reduction_tips"]))
 

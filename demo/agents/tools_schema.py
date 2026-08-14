@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from config import DEMO_FARM, PROV
 from ops import db
-from scoring.s5_recommend import window_risk, _load_calendar, WORK_WEIGHT, storage_factor
+from scoring.recommend import window_risk, _load_calendar, WORK_WEIGHT, storage_factor
 
 # legacy import (수정 금지)
 from diffusion import dispersion

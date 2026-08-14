@@ -50,11 +50,11 @@ def run_rag_v2():
 
 def check_design_changes():
     section("v2-5/6 설계 변경 확인")
-    from scoring import s5_recommend
+    from scoring import recommend
     from agents import notify_draft
     from datetime import timedelta
     print(f"  PLUME_GRADE_BUMP = {PLUME_GRADE_BUMP} (기본 OFF)")
-    rec = s5_recommend.recommend("액비살포", storage_days=12, tons=20.0)
+    rec = recommend.recommend("액비살포", storage_days=12, tons=20.0)
     R["s5_v2"] = {"recommended": rec["recommended"], "avoid": rec["avoid"]}
     print(f"  추천 창 등급 {rec['recommended']['grade']} / bumped={rec['recommended']['plume_bumped']}")
     print(f"  플룸 표기: {rec['recommended']['plume_note']}")

@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import section, DEMO_FARM
 from console import use_utf8_stdout
 from ops import daily_scoring
-from scoring import s5_recommend
+from scoring import recommend
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
 
     section("추천 — 법령(미구현) → ML → 플룸 그룹선택 → 조합 → 등급")
     for wt, sp in [("액비살포", "돼지"), ("분뇨제거", "한우"), ("청소", "육계")]:
-        o = s5_recommend.recommend_v6(wt, storage_days=12, tons=20.0,
+        o = recommend.recommend_v6(wt, storage_days=12, tons=20.0,
                                       method="표면살포", tillage=False, species=sp)
         r, a = o["recommended"], o["avoid"]
         print(f"\n[{sp} 농가 · {wt}]  후보 {o['n_candidates']}시각")

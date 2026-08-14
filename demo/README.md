@@ -153,7 +153,7 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
    └────────┬───────────────────────────┘
             │
 ╔═══════════│══════════════════════════════════════════════════════════════════╗
-║  [C] 추천 — scoring/s5_recommend.py                                          ║
+║  [C] 추천 — scoring/recommend.py                                          ║
 ╚═══════════│══════════════════════════════════════════════════════════════════╝
             │
    농가 입력 (작업유형 · 축종 · 살포량 · 공법 · 경운 · 저장경과일)
@@ -257,7 +257,7 @@ demo/
     scheduler.py        정기 실행
 
   scoring/
-    s5_recommend.py     6시간 창 · 플룸 선택 · 등급 · 조언
+    recommend.py     6시간 창 · 플룸 선택 · 등급 · 조언
 
   analysis/
     plume_select.py       플룸 수용점 유형 선택
@@ -350,7 +350,6 @@ demo/
 - [ ] RAG 인덱스 ② 저감 팁
 - [ ] `scoring/s6_cases.py` 유사사례 검색
 - [ ] `ops/farm_input.py` 피트 수위 추정 (두당 발생 원단위 확인 필요)
-- [ ] `scoring/s5_recommend.py` → `recommend.py` 개명 (PR #4 머지 후)
 - [ ] 중기예보 활용신청 — `data.go.kr` → `MidFcstInfoService`
 - [ ] **API 키 재발급** (최우선)
 
