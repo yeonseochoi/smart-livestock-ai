@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 from config import MID_DIR, OUT_DIR, SEED, finding
-from etl.s2_features import BINARY_FULL_FEATURES, FULL_FEATURES, REDUCED_FEATURES
+from etl.build_features import BINARY_FULL_FEATURES, FULL_FEATURES, REDUCED_FEATURES
 
 
 def weekly_ranking_hit(df: pd.DataFrame, proba_col: str, frac: float = 0.2) -> tuple[float, pd.DataFrame]:
@@ -265,7 +265,7 @@ def _run_one_group(f: pd.DataFrame, gname: str, feats: list) -> dict:
         pickle.dump({"model": m, "features": feats}, fh)
 
     # ── reduced 모델 (중기예보 D+4~7 용) — 바람 없이 학습 ──────────────
-    from etl.s2_features import REDUCED_FEATURES_V6
+    from etl.build_features import REDUCED_FEATURES_V6
     mr = XGBClassifier(
         n_estimators=300, max_depth=4, learning_rate=0.05,
         subsample=0.9, colsample_bytree=0.9, scale_pos_weight=spw,
@@ -340,7 +340,7 @@ def run_v6r(feat: pd.DataFrame) -> dict:
     """지역 격자 학습. 모델은 여전히 그룹당 1개(총 2개)."""
     from config import (GROUPS, REGION_GROUP, SPLIT_TRAIN_END,
                         SPLIT_VALID_YEAR, SPLIT_TEST_YEAR)
-    from etl.s2_features import FULL_FEATURES_V6
+    from etl.build_features import FULL_FEATURES_V6
 
     feats = FULL_FEATURES_V6
     out: dict = {}
@@ -419,7 +419,7 @@ def run_v6r(feat: pd.DataFrame) -> dict:
 
 def run_v6(feat: pd.DataFrame) -> dict:
     from config import GROUPS
-    from etl.s2_features import FULL_FEATURES_V6
+    from etl.build_features import FULL_FEATURES_V6
 
     feats = FULL_FEATURES_V6
     results = {}

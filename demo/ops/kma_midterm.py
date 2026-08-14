@@ -6,7 +6,7 @@ D+4~7 의 일 단위 {tmin, tmax, pop} 를 반환한다. 발표시각은 06시/1
   [A] 중기육상예보(강수확률) 전라북도 = 11F10000
   [A] 중기기온 대표지점 전주 = 11F10201
   [미확정] 익산 전용 중기기온 코드 — 가이드 코드표에서 익산 항목을 재확인해야
-  한다. KMA_KEY 확보 후 `python -m ops.kma_mid --probe` 를 실행하면 후보
+  한다. KMA_KEY 확보 후 `python -m ops.kma_midterm --probe` 를 실행하면 후보
   코드(11F10202~11F10211)를 실호출해 데이터가 오는 코드를 자동 확인한다.
   확정 전까지 기온 대표지점은 전주(11F10201)를 쓴다.
 """
@@ -119,4 +119,4 @@ if __name__ == "__main__":
     else:
         data = fetch_mid()
         print(data if data is not None
-              else "KMA_KEY 미설정 또는 호출 실패 — run_daily 는 mock 으로 폴백")
+              else "KMA_KEY 미설정 또는 호출 실패 — daily_scoring 는 mock 으로 폴백")

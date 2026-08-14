@@ -16,9 +16,9 @@ from xgboost import XGBClassifier
 
 from config import (DATA_ROOT, MID_DIR, OUT_DIR, PROV, SEED,
                     WANGGUNG_LAT, WANGGUNG_LON, finding)
-from etl.s2_features import FULL_FEATURES
-from model.s3_train import weekly_ranking_hit
-from analysis.s8_analysis import _dist_m, _load_cloud
+from etl.build_features import FULL_FEATURES
+from model.train_model import weekly_ranking_hit
+from analysis.figures import _dist_m, _load_cloud
 
 # legacy import (수정 금지)
 from geo import bearing, angle_diff

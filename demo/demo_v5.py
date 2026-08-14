@@ -34,7 +34,7 @@ FIGS = [
 
 def step19():
     section("v5-19 농가 발원 최종 플룸 판정")
-    from analysis import v5_farms, plume_multi
+    from analysis import v5_farms, plume_validation
     import pandas as pd
 
     farms = v5_farms.build_farm_coords()
@@ -45,7 +45,7 @@ def step19():
 
     src = pigs.rename(columns={"축종": "type"})[["farm_id", "lat", "lon"]]
     src.to_csv(MID_DIR / "pig_sources.csv", index=False, encoding="utf-8-sig")
-    res = plume_multi.evaluate(plume_multi.load_sources(MID_DIR / "pig_sources.csv"),
+    res = plume_validation.evaluate(plume_validation.load_sources(MID_DIR / "pig_sources.csv"),
                                radius_km=3.0, wind="aws")
     R["plume_final"] = res
     R["plume_final_judge"] = v5_farms.judge_final(res)
@@ -105,7 +105,7 @@ def write_final_report():
         f"개선돼 '다중 발원이 옳은 방향'임은 확인됐다. 현재 1순위 병목은 지오코딩 "
         f"정밀도다 — 농가 좌표가 리 단위 중앙값 [B]라 발원-수용점 기하에 수백 m "
         f"오차가 들어간다. 결정: 경계선 값으로 안전장치를 켜지 않는다(OFF 유지). "
-        f"허가 대장 실좌표 확보 시 plume_multi 재실행으로 재평가 — 그때 기준을 넘으면 "
+        f"허가 대장 실좌표 확보 시 plume_validation 재실행으로 재평가 — 그때 기준을 넘으면 "
         f"복원한다."
     )
 
@@ -132,7 +132,7 @@ def write_final_report():
 | v1 | 계획서 허점 16건 (좌표·work_weight 미정의, 학습-서빙 불일치 등), 플룸 적중 0.025, RAG 62% | ①~⑦ 전 구간 구현 + 문제 목록화 | 데모 가동, 검증 의제 확정 |
 | v2 | 성능 바닥은 달력(기후학 0.427), 조건부 가치 반전(평년>이상), ±0.5m/s 섭동 민감, "2026 드리프트"는 계절 구성 착시 | 플룸 등급 상향 OFF, 알림 대상 합집합, 프레이밍 교정 | 발표 수치 = "기후학 대비 증분"으로 확정 |
 | v3 | 전주↔익산 풍향 38도 어긋남 확정, 익산 바람으로도 플룸 FAIL, ML 은 익산 우세(적중 0.402→0.448) | 연속변수 모델 승격, RAG 위계 부스트(80% 달성), 바람 기본값=익산 권고 | 관측소 문제와 발원 문제 분리 |
-| v4 | **"3km 내 10건"의 원인 = 좌표 상수 3.35km 오류** (코드 정상), 교정 후에도 근거리 신고 지배로 플룸 FAIL, 별표 1~9 전부 깨짐 | 좌표 [B] 교정, 다중 발원 하네스·kma_mid·스케줄러 구축, ROC/리프트 준비 | 단일 발원 가정이 최종 병목으로 특정 |
+| v4 | **"3km 내 10건"의 원인 = 좌표 상수 3.35km 오류** (코드 정상), 교정 후에도 근거리 신고 지배로 플룸 FAIL, 별표 1~9 전부 깨짐 | 좌표 [B] 교정, 다중 발원 하네스·kma_midterm·스케줄러 구축, ROC/리프트 준비 | 단일 발원 가정이 최종 병목으로 특정 |
 | v5 | 실농가 {R['farms']['total']}곳 좌표 매핑(돼지 {R['farms']['pigs']}곳), 플룸 최종 {"PASS" if pj['passed'] else "FAIL"}, 별표는 PDF 원문에 내용 자체가 없음(복구 불가) | 최종 판정·폴백 규칙·발표 그래프 | **검증 종료** |
 
 ## 2. 3대 핵심 주장 최종 판정
@@ -160,7 +160,7 @@ PLUME_GRADE_BUMP 최종 결정: {bump_final}
 2. **플룸 미검증**: 실농가 발원으로도 방향 기준 미달 — 등급 반영 금지 유지,
    참고 정보·알림 후보 확대 용도로만 사용.
 3. **발원 좌표 정밀도**: 농가 좌표가 리 단위 중앙값/OSM 매핑 [B] — 허가 대장
-   좌표 확보 시 plume_multi 재실행 한 줄로 재평가 가능.
+   좌표 확보 시 plume_validation 재실행 한 줄로 재평가 가능.
 4. **근거리 신고 지배**: 발원 600m 이내 신고가 다수 — 방위 판정 불가 영역이며,
    "단지 내부 주민 피해"라는 별도 서비스 대상일 수 있음.
 5. **RAG 별표 공백**: 가축분뇨법 시행령 별표 1~9 원문이 보유 PDF 에 없음 —
@@ -179,8 +179,8 @@ PLUME_GRADE_BUMP 최종 결정: {bump_final}
 - **과거 단기예보 백테스트는 데이터 확보 시 '추가 옵션'이다** — 본 검증 종료의
   전제 조건이 아니며, 확보 즉시 한계 1번을 정량화하는 용도로 수행한다.
 - 검증 인프라는 모두 재실행 가능 상태로 보존:
-  demo.py(①~⑦) / demo_v2~v5(실험) / plume_multi(발원 CSV 투입) /
-  reingest_annex(DOC 투입) / kma_mid --probe(키 투입) / scheduler --once.
+  demo.py(①~⑦) / demo_v2~v5(실험) / plume_validation(발원 CSV 투입) /
+  reingest_annex(DOC 투입) / kma_midterm --probe(키 투입) / scheduler --once.
 
 ## 5. v5 세부 수치
 

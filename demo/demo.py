@@ -31,9 +31,9 @@ RESULTS: dict = {}
 
 def step1_etl():
     section("① S0~S1 — 데이터 정제 → 라벨 테이블 (실데이터)")
-    from etl import s0_clean, s1_label
-    c, w = s0_clean.run()
-    lab = s1_label.run(c, w)
+    from etl import clean_data, build_grid
+    c, w = clean_data.run()
+    lab = build_grid.run(c, w)
     RESULTS["s0_s1"] = {"complaints": len(c), "weather": len(w),
                         "label_rows": len(lab),
                         "pos_rate": round(float(lab["y_bin"].mean()), 4)}
@@ -42,8 +42,8 @@ def step1_etl():
 
 def step2_pipe():
     section("② S4 — 운영 배관 더미 관통 (모델 없이 전 구간 확인)")
-    from ops import run_daily
-    RESULTS["s4_dummy"] = run_daily.run(dummy=True)
+    from ops import daily_scoring
+    RESULTS["s4_dummy"] = daily_scoring.run(dummy=True)
 
 
 def step3_rag():
@@ -58,10 +58,10 @@ def step3_rag():
 
 def step4_model(lab):
     section("④ S2~S3 — 피처 엔지니어링 → 모델 학습·평가")
-    from etl import s2_features
-    from model import s3_train
-    feat = s2_features.run(lab)
-    res = s3_train.run(feat)
+    from etl import build_features
+    from model import train_model
+    feat = build_features.run(lab)
+    res = train_model.run(feat)
     res.pop("_valid_proba", None)
     RESULTS["s3_model"] = res
     return feat
@@ -69,16 +69,16 @@ def step4_model(lab):
 
 def step5_analysis_123(lab, c, w):
     section("⑤ S8-1~3 — 조건 재현·풍향 정합·거리 감쇠 (실데이터)")
-    from analysis import s8_analysis
-    RESULTS["s8_1"] = s8_analysis.s8_1_condition(lab)
-    RESULTS["s8_2"] = s8_analysis.s8_2_wind(lab)
-    RESULTS["s8_3"] = s8_analysis.s8_3_distance(c)
+    from analysis import figures
+    RESULTS["s8_1"] = figures.s8_1_condition(lab)
+    RESULTS["s8_2"] = figures.s8_2_wind(lab)
+    RESULTS["s8_3"] = figures.s8_3_distance(c)
 
 
 def step6_agents(rag_index, c, w):
     section("⑥ S7 — 에이전트 2종 + S8-4 플룸 적중률")
     from agents import work_guide, notify_draft
-    from analysis import s8_analysis
+    from analysis import figures
 
     print("\n[작업 가이드 에이전트 — 테스트 케이스 ①: 경과일 12일 + 위험 예보]")
     guide = work_guide.run(DEMO_FARM["farm_id"], "분뇨제거", rag_index)
@@ -92,16 +92,16 @@ def step6_agents(rag_index, c, w):
     RESULTS["s7_notify"].pop("message", None) or None
 
     print("\n[S8-4 플룸 적중률 (실측 기상 x 실제 민원 좌표)]")
-    RESULTS["s8_4"] = s8_analysis.s8_4_plume_hit(c, w)
+    RESULTS["s8_4"] = figures.s8_4_plume_hit(c, w)
 
 
 def step7_integrate(c=None):
     section("⑦ S5 — 통합: 실모델 교체 → 작업 창 추천 + S8-5 백테스트")
-    from ops import run_daily
+    from ops import daily_scoring
     from scoring import s5_recommend
-    from analysis import s8_analysis
+    from analysis import figures
 
-    RESULTS["s4_real"] = run_daily.run(dummy=False)
+    RESULTS["s4_real"] = daily_scoring.run(dummy=False)
 
     rec = s5_recommend.recommend("액비살포", storage_days=12, tons=20.0,
                                  method="표면살포")
@@ -115,8 +115,8 @@ def step7_integrate(c=None):
         print(f"  [배출] {rec['emission_kg']} kg NH3 — {rec['emission_note']}")
     RESULTS["s5_recommend"] = rec
 
-    RESULTS["s8_5"] = s8_analysis.s8_5_backtest()
-    RESULTS["s8_6"] = s8_analysis.s8_6_sensor()
+    RESULTS["s8_5"] = figures.s8_5_backtest()
+    RESULTS["s8_6"] = figures.s8_6_sensor()
 
 
 def write_report():
@@ -221,7 +221,7 @@ def write_report():
 11. **Chroma+임베딩 대신 TF-IDF 로 대체.** 데모 환경에 Chroma·임베딩 모델이 없어
     문자 n-gram TF-IDF 검색으로 구현했다(청킹 원칙은 준수). 계획서의 top-3 80%
     목표는 임베딩 기준이므로 아래 수치와 직접 비교하면 안 된다.
-12. **kma_mid.py 는 여전히 미구현.** 구역코드 확정(익산 코드 존재 여부)과 서비스키가
+12. **kma_midterm.py 는 여전히 미구현.** 구역코드 확정(익산 코드 존재 여부)과 서비스키가
     필요해 데모에서는 mock 일집계로 대체했다 — 계획서의 미해결 항목 그대로.
 
 ### 실데이터에서 드러난 것

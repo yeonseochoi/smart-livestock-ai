@@ -3,7 +3,7 @@
 발원 좌표 목록 CSV 를 입력받아, 민원별 '최근접 발원' 기준으로 플룸 적중률과
 방위각 정합을 계산한다. 농가 목록 데이터가 도착하면 파일 하나로 바로 실행:
 
-    python -m analysis.plume_multi "경로\농가목록.csv" [--radius-km 3] [--wind aws]
+    python -m analysis.plume_validation "경로\농가목록.csv" [--radius-km 3] [--wind aws]
 
 CSV 컬럼: lat, lon (또는 위도, 경도). farm_id/이름 컬럼은 있으면 결과에 표기.
 템플릿: data/sources_template.csv
@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from config import MID_DIR, OUT_DIR, WANGGUNG_LAT, WANGGUNG_LON
-from analysis.s8_analysis import _dist_m, _load_cloud
+from analysis.figures import _dist_m, _load_cloud
 
 # legacy import (수정 금지)
 from geo import bearing, angle_diff

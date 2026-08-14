@@ -81,9 +81,9 @@ chk("등급이 3종", set(d.risk_grade) <= {"낮음","주의","위험"}, str(d.r
 con.close()
 
 print("\n" + "=" * 78); print(" 6. 서빙 피처 분포가 학습과 어긋나지 않는가"); print("=" * 78)
-from ops import run_daily
-from etl import s2b_spatial
-from etl.s2_features import build_serving_features
+from ops import daily_scoring
+from etl import spatial_features
+from etl.build_features import build_serving_features
 import mock_forecast
 from geo import latlon_to_grid
 from config import DEMO_FARM
@@ -105,7 +105,7 @@ h = pd.concat([obs, fc], ignore_index=True).sort_values("dt_h")
 h["wd_sin"] = np.sin(np.radians(h.wd)); h["wd_cos"] = np.cos(np.radians(h.wd))
 b = pd.concat([h.assign(group=g) for g in GROUPS], ignore_index=True)
 b = build_serving_features(b)
-b = s2b_spatial.run_serving(b)
+b = spatial_features.run_serving(b)
 b = b[b.dt_h >= fc.dt_h.min()]
 chk("관측꼬리 덕에 calm_streak 이 0에서 시작하지 않음",
     float(b.groupby("group")["calm_streak"].first().max()) >= 0,

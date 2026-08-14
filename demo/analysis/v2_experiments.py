@@ -18,8 +18,8 @@ from sklearn.metrics import average_precision_score
 from xgboost import XGBClassifier
 
 from config import MID_DIR, OUT_DIR, SEED
-from etl.s2_features import FULL_FEATURES
-from model.s3_train import weekly_ranking_hit
+from etl.build_features import FULL_FEATURES
+from model.train_model import weekly_ranking_hit
 
 plt.rcParams["font.family"] = "Malgun Gothic"
 plt.rcParams["axes.unicode_minus"] = False

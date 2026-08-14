@@ -5,7 +5,7 @@
   dummy=False : 학습된 full/reduced 모델로 교체 (⑦ 실모델 교체)
 
 예보는 KMA_KEY 가 설정돼 있으면 legacy/kma.py 실 API, 없으면 legacy/mock_forecast
-(공식 데모 폴백 경로). 중기예보(D+4~7)는 kma_mid.py 신규 작성 대상이지만 서비스키가
+(공식 데모 폴백 경로). 중기예보(D+4~7)는 kma_midterm.py 신규 작성 대상이지만 서비스키가
 없어 데모에서는 단기 mock 시나리오의 일 단위 집계로 대체한다 — 어떤 걸 썼는지 로깅.
 """
 from __future__ import annotations
@@ -92,8 +92,8 @@ def run_v6(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
       안 하면 서빙에서 calm_streak 이 항상 0 에서 시작해 학습 분포와 어긋난다.
     """
     from config import GROUPS
-    from etl import s2b_spatial
-    from etl.s2_features import build_serving_features
+    from etl import spatial_features
+    from etl.build_features import build_serving_features
 
     con = db.connect()
     db.upsert_farm(con, DEMO_FARM)
@@ -138,8 +138,8 @@ def run_v6(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
     # 그룹 축을 곱한다
     b = pd.concat([hourly.assign(group=g) for g in GROUPS], ignore_index=True)
     b = build_serving_features(b)
-    b = s2b_spatial.run_serving(b)
-    b = s2b_spatial.add_prior_rate_serving(b, asof=pd.Timestamp(now).floor("h"))
+    b = spatial_features.run_serving(b)
+    b = spatial_features.add_prior_rate_serving(b, asof=pd.Timestamp(now).floor("h"))
     b = b[b["dt_h"] >= fc_start].copy()          # 관측 꼬리 제거
     b["date"] = b["dt_h"].dt.strftime("%Y-%m-%d")
     b["hour"] = b["dt_h"].dt.hour
@@ -174,7 +174,7 @@ def run_v6(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
     try:
         n_mid = _append_mid_v6(con, now, stamp, fc["dt_h"].max())
     except FileNotFoundError:
-        finding("reduced_v6 모델 없음 — 중기예보 구간 생략 (s3_train.run_v6 재실행 필요)")
+        finding("reduced_v6 모델 없음 — 중기예보 구간 생략 (train_model.run_v6 재실행 필요)")
     except Exception as e:
         finding(f"중기예보 처리 실패({e!r}) — 단기예보 구간만 제공")
 
@@ -195,13 +195,13 @@ def _append_mid_v6(con, now, stamp, last_short) -> int:
     일 확률을 24시간에 복제하되, 시간 프로파일은 모델의 hour 피처가 만든다.
     """
     from config import GROUPS
-    from etl.s2_features import REDUCED_FEATURES_V6
-    from ops import kma_mid
+    from etl.build_features import REDUCED_FEATURES_V6
+    from ops import kma_midterm
 
-    mid = kma_mid.fetch_mid(now)
+    mid = kma_midterm.fetch_mid(now)
     if mid is not None:
-        mid_src, mid_real = (f"기상청 중기예보 API (육상 {kma_mid.MID_LAND_REG_ID}, "
-                             f"기온 {kma_mid.MID_TA_REG_ID})"), True
+        mid_src, mid_real = (f"기상청 중기예보 API (육상 {kma_midterm.MID_LAND_REG_ID}, "
+                             f"기온 {kma_midterm.MID_TA_REG_ID})"), True
     else:
         # 폴백 — 단기예보 마지막 날을 D+4~7 로 복제 (mock 경로)
         finding("중기예보 API 미승인/실패 — 단기예보 일집계로 폴백 "
@@ -313,10 +313,10 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
             out.append((r["date"], int(r["block"]), round(float(p), 4),
                         _grade(float(p), cuts), "full", stamp))
 
-        # D+4~7: 중기예보 (ops/kma_mid — KMA_KEY 있으면 실 API) + reduced 모델.
+        # D+4~7: 중기예보 (ops/kma_midterm — KMA_KEY 있으면 실 API) + reduced 모델.
         # 중기예보는 일 단위라 블록 해상도가 없다 → 일 확률을 8블록에 복제.
-        from ops import kma_mid
-        mid = kma_mid.fetch_mid(now)
+        from ops import kma_midterm
+        mid = kma_midterm.fetch_mid(now)
         mid_rows = []
         if mid is not None:
             for day, v in mid.items():
@@ -326,8 +326,8 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
                 for block in range(8):
                     mid_rows.append({"date": day, "block": block,
                                      "temp": temp, "rain": rain})
-            mid_src, mid_real = f"기상청 중기예보 API (육상 {kma_mid.MID_LAND_REG_ID}, " \
-                                f"기온 {kma_mid.MID_TA_REG_ID})", True
+            mid_src, mid_real = f"기상청 중기예보 API (육상 {kma_midterm.MID_LAND_REG_ID}, " \
+                                f"기온 {kma_midterm.MID_TA_REG_ID})", True
         else:
             day_agg = blk.groupby("date").agg(temp=("temp", "mean"),
                                               rain=("rain", "max")).reset_index()
@@ -338,7 +338,7 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
                 for block in range(8):
                     mid_rows.append({"date": day, "block": block,
                                      "temp": src["temp"], "rain": src["rain"]})
-            mid_src, mid_real = "mock 일집계 (KMA_KEY 미설정 — kma_mid 폴백)", False
+            mid_src, mid_real = "mock 일집계 (KMA_KEY 미설정 — kma_midterm 폴백)", False
         mb = pd.DataFrame(mid_rows)
         md = pd.to_datetime(mb["date"])
         mb["month_sin"] = np.sin(2 * np.pi * md.dt.month / 12)
@@ -353,7 +353,7 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
 
     db.upsert_risk(con, out)
     n = con.execute("SELECT COUNT(*) FROM risk_calendar").fetchone()[0]
-    print(f"  run_daily({'dummy' if dummy else 'real model'}): {len(out)}블록 upsert, "
+    print(f"  daily_scoring({'dummy' if dummy else 'real model'}): {len(out)}블록 upsert, "
           f"risk_calendar 총 {n}행 — {model_note}")
     con.close()
     return {"n_upsert": len(out), "model": model_note}

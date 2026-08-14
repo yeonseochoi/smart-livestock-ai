@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from config import MID_DIR
-from analysis.s8_analysis import _dist_m
+from analysis.figures import _dist_m
 
 # 사용자 제공: 지역=='왕궁면 흥암리' 가축분뇨 민원 727건의 중앙값 좌표
 USER_COORD = (35.968937, 127.090910)

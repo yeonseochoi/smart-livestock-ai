@@ -32,7 +32,7 @@ from geo import bearing, angle_diff
 from plume import pasquill_class, plume_half_angle
 
 PLUME_MAX_KM = 3.0        # 이 거리까지만 플룸으로 판정
-SECTOR_DEG = 30.0         # 그 밖은 고정 섹터 반각 (s2b_spatial 과 동일 값)
+SECTOR_DEG = 30.0         # 그 밖은 고정 섹터 반각 (spatial_features 과 동일 값)
 _R = 6371.0
 
 

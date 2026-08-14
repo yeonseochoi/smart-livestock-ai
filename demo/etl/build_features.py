@@ -9,7 +9,7 @@ v6 변경 — 방향성 피처 금지를 해제한다.
   ①은 수용점 기준 '어디서 오나', ②는 발원 기준 '어디로 가나' — 방향도 단계도 다르다.
 
 [구현 편차] 문서 13-6 E-1 은 FULL_FEATURES 자체를 v6 목록으로 바꾸라고 하지만,
-model/s3_train.py 가 이 이름을 그대로 import 해 v5 를 학습한다. 바꾸면 v5 트랙이
+model/train_model.py 가 이 이름을 그대로 import 해 v5 를 학습한다. 바꾸면 v5 트랙이
 즉시 깨지고 회귀 체크리스트 2번("v5 weekly_hit 0.467 유지")을 통과할 수 없다.
 → FULL_FEATURES 는 v5 그대로 두고 FULL_FEATURES_V6 를 새로 추가했다.
 """
@@ -61,7 +61,7 @@ def run(lab: pd.DataFrame) -> pd.DataFrame:
 # v6 — 시차·무풍 + 공간 + 직전1년 민원율
 # ═══════════════════════════════════════════════════════════════════
 
-from etl.s2b_spatial import SPATIAL_FEATURES, PRIOR_FEATURES  # noqa: E402
+from etl.spatial_features import SPATIAL_FEATURES, PRIOR_FEATURES  # noqa: E402
 
 # v5 유산 — 기존 트랙 재현용. 절대 수정하지 말 것. (= 위의 FULL_FEATURES)
 FULL_FEATURES_V5 = list(FULL_FEATURES)

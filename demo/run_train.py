@@ -1,6 +1,6 @@
 """v6 — 격자 재정의 라운드 (모델링까지. RAG·추천·서빙 제외).
 
-python demo_v6.py
+python run_train.py
 
 1. S0   정제 (complaints_clean / weather_hourly 없으면 자동 생성)
 2. S0b  김제 리 재지오코딩
@@ -37,30 +37,30 @@ def bootstrap_s0():
     if cpath.exists() and wpath.exists():
         print("  기존 S0 산출물 사용")
         return pd.read_parquet(cpath), pd.read_parquet(wpath)
-    from etl import s0_clean
-    return s0_clean.run()
+    from etl import clean_data
+    return clean_data.run()
 
 
 def main():
     use_utf8_stdout()
     print("악취·분뇨 프로젝트 — v6 격자 재정의 (모델링까지)")
 
-    from etl import s0b_gimje, s1_label, s2_features, s2b_spatial
-    from model import s3_train
+    from etl import geocode_gimje, build_grid, build_features, spatial_features
+    from model import train_model
 
     section("v6-0 S0 — 민원·기상 정제")
     c, w = bootstrap_s0()
     RESULTS["s0"] = {"complaints": len(c), "weather": len(w)}
 
     section("v6-1 S0b — 김제 리 재지오코딩")
-    gj = s0b_gimje.run()
-    RESULTS["s0b_gimje"] = {
+    gj = geocode_gimje.run()
+    RESULTS["geocode_gimje"] = {
         "rows": len(gj), "with_coord": int(gj["lat"].notna().sum()),
         "src": {k: int(v) for k, v in gj["src"].value_counts().items()},
     }
 
     section("v6-2 S1' — (그룹, 1시간) 라벨 테이블")
-    lab = s1_label.run_v6(c, w)
+    lab = build_grid.run_v6(c, w)
     RESULTS["s1_v6"] = {
         "rows": len(lab),
         "pos_rate": round(float(lab["y_bin"].mean()), 4),
@@ -69,17 +69,17 @@ def main():
     }
 
     section("v6-3 S2b — 풍상측 노출 + 직전1년 민원율")
-    lab = s2b_spatial.run(lab)
-    lab = s2b_spatial.add_prior_rate(lab)
+    lab = spatial_features.run(lab)
+    lab = spatial_features.add_prior_rate(lab)
 
     section("v6-4 S2' — 시차·무풍 피처")
-    feat = s2_features.run_v6(lab)
+    feat = build_features.run_v6(lab)
     RESULTS["s2_v6"] = {"rows": len(feat),
-                        "n_features": len(s2_features.FULL_FEATURES_V6),
-                        "features": s2_features.FULL_FEATURES_V6}
+                        "n_features": len(build_features.FULL_FEATURES_V6),
+                        "features": build_features.FULL_FEATURES_V6}
 
     section("v6-5 S3' — 그룹별 학습 + grouped CV")
-    RESULTS["s3_v6"] = s3_train.run_v6(feat)
+    RESULTS["s3_v6"] = train_model.run_v6(feat)
 
     section("결과 저장")
     RESULTS["findings"] = FINDINGS

@@ -61,7 +61,7 @@ def _load_calendar_v6() -> dict:
 
 
 def _load_forecast_wind() -> dict:
-    """{시각: {wd, ws, sky}} — 플룸 그룹 선택용. run_daily 가 저장한 예보 원값."""
+    """{시각: {wd, ws, sky}} — 플룸 그룹 선택용. daily_scoring 가 저장한 예보 원값."""
     con = db.connect()
     try:
         rows = con.execute(
@@ -135,7 +135,7 @@ def recommend_v6(work_type: str, storage_days: int | None = None,
 
     cal_all = _load_calendar_v6()
     if not cal_all:
-        raise RuntimeError("risk_calendar_v6 가 비어 있습니다 — run_daily.run_v6() 먼저")
+        raise RuntimeError("risk_calendar_v6 가 비어 있습니다 — daily_scoring.run_v6() 먼저")
     sf = storage_factor(storage_days)
     groups = list(cal_all)
     wind = _load_forecast_wind()          # {시각: {wd, ws, sky}}

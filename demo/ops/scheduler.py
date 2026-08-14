@@ -1,6 +1,6 @@
 """지시 17 — 상시 구동 스케줄러.
 
-매일 06:00 (단기예보 05시 발표 + 여유) 에 run_daily(실모델) 실행.
+매일 06:00 (단기예보 05시 발표 + 여유) 에 daily_scoring(실모델) 실행.
 실패해도 스케줄러는 죽지 않고 이전 캘린더를 유지한다 (계획서 S4 요구).
 
     python -m ops.scheduler          # 상시 구동 (Ctrl+C 종료)
@@ -20,13 +20,13 @@ RUN_HOUR = 6
 
 
 def job() -> None:
-    from ops import run_daily
+    from ops import daily_scoring
     try:
-        res = run_daily.run(dummy=False)
-        print(f"[{datetime.now():%Y-%m-%d %H:%M}] run_daily 성공: {res['model']}")
+        res = daily_scoring.run(dummy=False)
+        print(f"[{datetime.now():%Y-%m-%d %H:%M}] daily_scoring 성공: {res['model']}")
     except Exception:
         # 실패 시 risk_calendar 는 갱신되지 않으므로 이전 캘린더가 자동 유지된다
-        print(f"[{datetime.now():%Y-%m-%d %H:%M}] run_daily 실패 — 이전 캘린더 유지")
+        print(f"[{datetime.now():%Y-%m-%d %H:%M}] daily_scoring 실패 — 이전 캘린더 유지")
         traceback.print_exc()
 
 
@@ -38,9 +38,9 @@ def main() -> None:
         return
     from apscheduler.schedulers.blocking import BlockingScheduler
     sched = BlockingScheduler()
-    sched.add_job(job, "cron", hour=RUN_HOUR, minute=0, id="run_daily",
+    sched.add_job(job, "cron", hour=RUN_HOUR, minute=0, id="daily_scoring",
                   misfire_grace_time=3600)
-    print(f"스케줄러 시작 — 매일 {RUN_HOUR:02d}:00 run_daily 실행 (Ctrl+C 종료)")
+    print(f"스케줄러 시작 — 매일 {RUN_HOUR:02d}:00 daily_scoring 실행 (Ctrl+C 종료)")
     try:
         sched.start()
     except (KeyboardInterrupt, SystemExit):

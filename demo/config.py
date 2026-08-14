@@ -50,7 +50,7 @@ ASOS_FULL_CSV = DATA_ROOT / "02_기상데이터" / "asos_146_2020_2025_utf8.csv"
 #   · 남는 설명 — 전주의 20도 양자화가 국지 난류를 걸러내는 스무딩으로 작동해
 #     '냄새가 퍼지는 광역 기상 패턴'의 대리변수로 더 안정적이다.
 #
-# 역할 분담: 예측(ML)은 전주, 방향 판정(플룸 plume_multi)은 익산 AWS 를 쓴다.
+# 역할 분담: 예측(ML)은 전주, 방향 판정(플룸 plume_validation)은 익산 AWS 를 쓴다.
 # 전운량(대기안정도)은 AWS 에 없어 전주 ASOS 만 가능하며, ML 피처에는 없다.
 WEATHER_SOURCE = "jeonju_asos"
 
@@ -150,7 +150,7 @@ REGION_GROUP_R.update({
 })
 REGIONS = tuple(REGION_GROUP_R)
 
-# 지역별 중심 좌표는 s1_label.run_v6r() 이 민원 좌표 중앙값으로 산출해 채운다.
+# 지역별 중심 좌표는 build_grid.run_v6r() 이 민원 좌표 중앙값으로 산출해 채운다.
 REGION_CENTER: dict = {}
 
 # 그룹별 대표 좌표 = 해당 그룹 민원 좌표의 중앙값. s1 실행 시 자동 산출해 덮어쓴다.
@@ -160,7 +160,7 @@ GROUP_CENTER = {
     GROUP_URBAN: (35.945, 126.970),         # DOWNTOWN 근사 [C]
 }
 
-# ★ 학습(s1_label.run_v6)이 산출한 실제 중심을 파일에서 되읽는다.
+# ★ 학습(build_grid.run_v6)이 산출한 실제 중심을 파일에서 되읽는다.
 #   이게 없으면 학습은 민원 중앙값 중심으로 공간 피처를 만들고, 서빙은 위 폴백값
 #   중심으로 만들어 두 분포가 어긋난다 (시가지 기준 약 0.9km 차이).
 _GC_PATH = MID_DIR / "group_center.json"

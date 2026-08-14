@@ -3,9 +3,9 @@
 python demo_v4.py  (demo.py 선실행 필요)
 
 14. [최우선] "왕궁 3km 내 10건" 재검증 → 원인 규명 → 좌표 교정 → 플룸 전면 재실행
-15. 다중 발원 플룸 하네스 (analysis/plume_multi.py) — 템플릿으로 가동 검증
+15. 다중 발원 플룸 하네스 (analysis/plume_validation.py) — 템플릿으로 가동 검증
 16. RAG 별표 재추출 준비 (rag/reingest_annex.py) — 대기 모드 점검
-17. 조립: ops/kma_mid.py + ops/scheduler.py, run_daily 연결 검증
+17. 조립: ops/kma_midterm.py + ops/scheduler.py, daily_scoring 연결 검증
 18. ROC-AUC 병기 + 리프트 차트
 
 출력: out/validation_report_v4.md, out/v4_results.json,
@@ -41,43 +41,43 @@ def main():
     print(f"  → config 좌표 교정 완료: ({config.WANGGUNG_LAT}, {config.WANGGUNG_LON}) [B]")
 
     section("v4-14b 교정 좌표로 S8-2/3/4 재생성 + 플룸 판정 전면 재실행")
-    from analysis import s8_analysis, v3_aws
+    from analysis import figures, v3_aws
     lab = pd.read_parquet(MID_DIR / "label_table.parquet")
     comp = pd.read_parquet(MID_DIR / "complaints_clean.parquet")
     w = pd.read_parquet(MID_DIR / "weather_hourly.parquet")
-    R["s8_2_fixed"] = s8_analysis.s8_2_wind(lab)
-    R["s8_3_fixed"] = s8_analysis.s8_3_distance(comp)
-    R["s8_4_fixed"] = s8_analysis.s8_4_plume_hit(comp, w)
+    R["s8_2_fixed"] = figures.s8_2_wind(lab)
+    R["s8_3_fixed"] = figures.s8_3_distance(comp)
+    R["s8_4_fixed"] = figures.s8_4_plume_hit(comp, w)
     R["exp9_fixed"] = v3_aws.exp9_plume(radii_km=(3.0, 5.0, 8.0))
     R["plume_judge_fixed"] = v3_aws.judge_plume(R["exp9_fixed"])
     print(f"  통과 기준 판정(교정 좌표): {R['plume_judge_fixed']}")
 
     section("v4-15 다중 발원 플룸 하네스 — 템플릿 가동 검증")
-    from analysis import plume_multi
-    plume_multi.write_template()
-    R["multi_demo"] = plume_multi.evaluate(
-        plume_multi.load_sources(plume_multi.TEMPLATE), radius_km=3.0, wind="aws")
-    print("  농가 목록 도착 시: python -m analysis.plume_multi <목록.csv>")
+    from analysis import plume_validation
+    plume_validation.write_template()
+    R["multi_demo"] = plume_validation.evaluate(
+        plume_validation.load_sources(plume_validation.TEMPLATE), radius_km=3.0, wind="aws")
+    print("  농가 목록 도착 시: python -m analysis.plume_validation <목록.csv>")
 
     section("v4-16 RAG 별표 재추출 준비 — 대기 모드 점검")
     from rag import reingest_annex
     R["annex_broken"] = len(reingest_annex.health_check())
     print("  원문 도착 시: python -m rag.reingest_annex <시행령.docx|pdf>")
 
-    section("v4-17 조립: kma_mid + scheduler")
-    from ops import kma_mid
+    section("v4-17 조립: kma_midterm + scheduler")
+    from ops import kma_midterm
     import os
-    R["kma_mid"] = {
-        "land_reg": kma_mid.MID_LAND_REG_ID, "ta_reg": kma_mid.MID_TA_REG_ID,
-        "tmfc_now": kma_mid.latest_tmfc(),
-        "live": kma_mid.fetch_mid() is not None,
+    R["kma_midterm"] = {
+        "land_reg": kma_midterm.MID_LAND_REG_ID, "ta_reg": kma_midterm.MID_TA_REG_ID,
+        "tmfc_now": kma_midterm.latest_tmfc(),
+        "live": kma_midterm.fetch_mid() is not None,
     }
-    print(f"  구역코드: 육상 {R['kma_mid']['land_reg']} [A] / "
-          f"기온 {R['kma_mid']['ta_reg']} [A, 전주 — 익산 코드는 --probe 로 확정]")
-    print(f"  발표시각 계산: tmFc={R['kma_mid']['tmfc_now']} / "
-          f"실 API: {'연결됨' if R['kma_mid']['live'] else 'KMA_KEY 대기 (mock 폴백 동작)'}")
+    print(f"  구역코드: 육상 {R['kma_midterm']['land_reg']} [A] / "
+          f"기온 {R['kma_midterm']['ta_reg']} [A, 전주 — 익산 코드는 --probe 로 확정]")
+    print(f"  발표시각 계산: tmFc={R['kma_midterm']['tmfc_now']} / "
+          f"실 API: {'연결됨' if R['kma_midterm']['live'] else 'KMA_KEY 대기 (mock 폴백 동작)'}")
     from ops import scheduler
-    scheduler.job()   # --once 경로 검증 (실모델 run_daily 관통)
+    scheduler.job()   # --once 경로 검증 (실모델 daily_scoring 관통)
     R["scheduler_once_ok"] = True
 
     section("v4-18 ROC-AUC 병기 + 리프트 차트")
@@ -111,7 +111,7 @@ def write_report():
 
     bump = (
         "**PASS — PLUME_GRADE_BUMP 복원을 권고한다** (config 플래그 ON 으로 교체). "
-        "다만 다중 발원 목록 도착 시 plume_multi 로 재확인 후 유지 여부를 재평가할 것."
+        "다만 다중 발원 목록 도착 시 plume_validation 로 재확인 후 유지 여부를 재평가할 것."
         if pj["passed"] else
         "**미통과 — PLUME_GRADE_BUMP 는 OFF 유지.** 좌표 교정 후에도 통과 기준에 못 "
         "미치므로 남은 병목은 '왕궁 단일 발원' 가정이다. 다중 발원 하네스(15절)에 "
@@ -173,10 +173,10 @@ S8-4 플룸 적중 {R['s8_4_fixed']['hit']:.3f} vs 플라시보 {R['s8_4_fixed']
 
 ## 15. 다중 발원 플룸 하네스 (구현 완료, 대기 중)
 
-`analysis/plume_multi.py` — 발원 목록 CSV(farm_id, lat, lon)를 받아 민원별
+`analysis/plume_validation.py` — 발원 목록 CSV(farm_id, lat, lon)를 받아 민원별
 **최근접 발원** 기준 적중률·방위각 정합·발원별 상세(out/plume_multi_results.csv)를
 계산한다. 농가 목록 도착 시:
-`python -m analysis.plume_multi "농가목록.csv" --radius-km 3 --wind aws`
+`python -m analysis.plume_validation "농가목록.csv" --radius-km 3 --wind aws`
 
 가동 검증(발원 1개 = 흥암리 템플릿): 민원 {R['multi_demo']['n']}건, 적중
 {R['multi_demo']['hit']}, lift x{R['multi_demo']['lift']}, 근거리(<600m) 비중
@@ -193,18 +193,18 @@ S8-4 플룸 적중 {R['s8_4_fixed']['hit']:.3f} vs 플라시보 {R['s8_4_fixed']
 
 ## 17. 조립 진행 — 중기예보 클라이언트 + 상시 스케줄러
 
-- **ops/kma_mid.py**: getMidLandFcst + getMidTa, 발표시각(06/18시) 자동 계산,
-  D+4~7 {{tmin, tmax, pop}} 반환. run_daily 에 연결 완료 — KMA_KEY 가 설정되면
-  자동으로 실 API, 없으면 mock 폴백(현재 상태: {"실 API 연결" if R['kma_mid']['live'] else "키 대기, mock 폴백 검증됨"}).
-- **구역코드 상수화**: 중기육상(강수확률) 전라북도 = **{R['kma_mid']['land_reg']}** [A],
-  중기기온 = **{R['kma_mid']['ta_reg']}** (전주) [A]. **익산 전용 기온 코드는 공개
+- **ops/kma_midterm.py**: getMidLandFcst + getMidTa, 발표시각(06/18시) 자동 계산,
+  D+4~7 {{tmin, tmax, pop}} 반환. daily_scoring 에 연결 완료 — KMA_KEY 가 설정되면
+  자동으로 실 API, 없으면 mock 폴백(현재 상태: {"실 API 연결" if R['kma_midterm']['live'] else "키 대기, mock 폴백 검증됨"}).
+- **구역코드 상수화**: 중기육상(강수확률) 전라북도 = **{R['kma_midterm']['land_reg']}** [A],
+  중기기온 = **{R['kma_midterm']['ta_reg']}** (전주) [A]. **익산 전용 기온 코드는 공개
   코드표에서 확정하지 못했다** — 가이드 코드표(활용가이드 한글파일)의 전북 항목
-  재확인이 필요하며, 키 확보 즉시 `python -m ops.kma_mid --probe` 가 후보
+  재확인이 필요하며, 키 확보 즉시 `python -m ops.kma_midterm --probe` 가 후보
   11F10202~11 을 실호출해 자동 확정한다. 중기기온의 min/max 중 무엇을 피처로
   쓸지는 계획서 미규정(v2 허점 2)이라 평균 사용 [C] 로 명시했다.
 - **ops/scheduler.py**: APScheduler 상시 구동(매일 06:00, misfire 1시간 유예,
   실패 시 이전 캘린더 유지) + `--once` 검증 모드. 본 실행에서 `--once` 경로로
-  실모델 run_daily 관통 확인.
+  실모델 daily_scoring 관통 확인.
 
 ## 18. 커뮤니케이션용 지표 (첫인상용 — 메인 프레임은 기후학 대비 증분 유지)
 
@@ -221,9 +221,9 @@ S8-4 플룸 적중 {R['s8_4_fixed']['hit']:.3f} vs 플라시보 {R['s8_4_fixed']
 
 ## 남은 대기 항목
 
-1. 농가별 발원 목록 → plume_multi 재검증 → BUMP 재평가
+1. 농가별 발원 목록 → plume_validation 재검증 → BUMP 재평가
 2. 가축분뇨법 시행령 원문 → 별표 재추출 → RAG 35문항 재측정
-3. KMA_KEY → kma_mid 실 API + 익산 기온 코드 probe 확정
+3. KMA_KEY → kma_midterm 실 API + 익산 기온 코드 probe 확정
 4. 과거 단기예보 자료 → 예보 열화 백테스트
 """
     (OUT_DIR / "validation_report_v4.md").write_text(report, encoding="utf-8")
