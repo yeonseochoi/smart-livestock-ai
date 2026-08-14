@@ -9,6 +9,14 @@ DDL = """
 CREATE TABLE IF NOT EXISTS risk_calendar(
     date TEXT, block INT, risk_prob REAL, risk_grade TEXT,
     model_type TEXT, updated_at TEXT, PRIMARY KEY(date, block));
+CREATE TABLE IF NOT EXISTS risk_calendar_v6(
+    date TEXT, hour INT, grp TEXT, risk_prob REAL, risk_grade TEXT,
+    model_type TEXT, updated_at TEXT,
+    PRIMARY KEY(date, hour, grp));
+CREATE TABLE IF NOT EXISTS forecast_hourly_v6(
+    date TEXT, hour INT, wd REAL, ws REAL, sky TEXT, temp REAL, humid REAL,
+    rain INT, source TEXT, updated_at TEXT,
+    PRIMARY KEY(date, hour));
 CREATE TABLE IF NOT EXISTS farm_config(
     farm_id TEXT PRIMARY KEY, name TEXT, lat REAL, lon REAL,
     facility_type TEXT, last_manure_removal_date TEXT);
@@ -34,6 +42,42 @@ def upsert_risk(con: sqlite3.Connection, rows: list[tuple]) -> None:
         "VALUES(?,?,?,?,?,?) ON CONFLICT(date, block) DO UPDATE SET "
         "risk_prob=excluded.risk_prob, risk_grade=excluded.risk_grade, "
         "model_type=excluded.model_type, updated_at=excluded.updated_at",
+        rows,
+    )
+    con.commit()
+
+
+def upsert_risk_v6(con: sqlite3.Connection, rows: list[tuple]) -> None:
+    """rows: (date, hour, grp, risk_prob, risk_grade, model_type, updated_at)
+
+    ★ 기존 risk_calendar 는 PRIMARY KEY(date, block) 이라 그룹을 도입하면
+      뒤 행이 앞 행을 조용히 덮어쓴다. 그래서 별도 테이블을 쓴다.
+      grp 인 이유 — group 은 SQL 예약어라 컬럼명으로 못 쓴다.
+    """
+    con.executemany(
+        "INSERT INTO risk_calendar_v6(date, hour, grp, risk_prob, risk_grade, "
+        "model_type, updated_at) VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(date, hour, grp) DO UPDATE SET "
+        "risk_prob=excluded.risk_prob, risk_grade=excluded.risk_grade, "
+        "model_type=excluded.model_type, updated_at=excluded.updated_at",
+        rows,
+    )
+    con.commit()
+
+
+def upsert_forecast_v6(con: sqlite3.Connection, rows: list[tuple]) -> None:
+    """rows: (date, hour, wd, ws, sky, temp, humid, rain, source, updated_at)
+
+    s5 의 플룸 그룹 선택이 시각별 바람을 필요로 한다. risk_calendar_v6 에는
+    확률만 있으므로 예보 원값을 따로 남긴다 (재호출 방지).
+    """
+    con.executemany(
+        "INSERT INTO forecast_hourly_v6(date, hour, wd, ws, sky, temp, humid, "
+        "rain, source, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(date, hour) DO UPDATE SET "
+        "wd=excluded.wd, ws=excluded.ws, sky=excluded.sky, temp=excluded.temp, "
+        "humid=excluded.humid, rain=excluded.rain, source=excluded.source, "
+        "updated_at=excluded.updated_at",
         rows,
     )
     con.commit()
