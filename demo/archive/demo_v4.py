@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # archive/ -> demo/
 
 import config
 from config import MID_DIR, OUT_DIR, section
@@ -36,12 +36,13 @@ def main():
     import pandas as pd
 
     section("v4-14 '왕궁 3km 내 10건' 재검증 (최우선)")
-    from analysis import v4_diag14
+    from archive import v4_diag14
     R["diag14"] = v4_diag14.run()
     print(f"  → config 좌표 교정 완료: ({config.WANGGUNG_LAT}, {config.WANGGUNG_LON}) [B]")
 
     section("v4-14b 교정 좌표로 S8-2/3/4 재생성 + 플룸 판정 전면 재실행")
-    from analysis import figures, v3_aws
+    from analysis import figures
+    from archive import v3_aws
     lab = pd.read_parquet(MID_DIR / "label_table.parquet")
     comp = pd.read_parquet(MID_DIR / "complaints_clean.parquet")
     w = pd.read_parquet(MID_DIR / "weather_hourly.parquet")
@@ -81,7 +82,7 @@ def main():
     R["scheduler_once_ok"] = True
 
     section("v4-18 ROC-AUC 병기 + 리프트 차트")
-    from analysis import v4_metrics
+    from archive import v4_metrics
     R["metrics"] = v4_metrics.run()
     aws_ml = v3_aws.exp10_ml(pd.read_parquet(MID_DIR / "weather_aws.parquet"))
     R["aws_ml"] = aws_ml

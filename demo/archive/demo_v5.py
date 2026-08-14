@@ -15,7 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # archive/ -> demo/
 
 from config import MID_DIR, OUT_DIR, PLUME_GRADE_BUMP, section
 from console import use_utf8_stdout  # legacy import (수정 금지)
@@ -34,7 +34,8 @@ FIGS = [
 
 def step19():
     section("v5-19 농가 발원 최종 플룸 판정")
-    from analysis import v5_farms, plume_validation
+    from analysis import plume_validation
+    from archive import v5_farms
     import pandas as pd
 
     farms = v5_farms.build_farm_coords()

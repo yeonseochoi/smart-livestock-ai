@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # archive/ -> demo/
 
 from config import MID_DIR, OUT_DIR, PROV, section
 from console import use_utf8_stdout  # legacy import (수정 금지)
@@ -32,7 +32,7 @@ def main():
     if not (MID_DIR / "complaints_clean.parquet").exists():
         raise SystemExit("data/ 산출물이 없습니다. 먼저 python demo.py 를 실행하세요.")
 
-    from analysis import v3_aws
+    from archive import v3_aws
 
     section("전처리 — 익산 AWS(702) 정제")
     aws = v3_aws.prep_aws()

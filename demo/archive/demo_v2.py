@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # archive/ -> demo/
 
 import config
 from config import MID_DIR, OUT_DIR, PLUME_GRADE_BUMP, section
@@ -27,7 +27,7 @@ R: dict = {}
 
 
 def run_experiments():
-    from analysis import v2_experiments as ex
+    from archive import v2_experiments as ex
     section("v2-1 기후학 베이스라인 3자 대결 (test 2026.1~7)")
     R["exp1"] = ex.exp1_baselines()
     section("v2-2 조건부 가치 — 기상 이상 블록에서의 부가가치")

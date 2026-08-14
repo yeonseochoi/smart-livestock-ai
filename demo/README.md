@@ -53,7 +53,7 @@ python run_check.py     # 검증    — 회귀 점검 39항목
 **v5 트랙(과거 버전)** 도 그대로 보존되어 있다.
 ```powershell
 python demo.py                      # v5 전체 실행 + legacy 무결성 해시 검증
-python demo_v2.py ~ demo_v5.py      # 과거 검증 라운드 재현
+python archive/demo_v2.py ~ demo_v5.py   # 과거 검증 라운드 재현
 python run_train_region.py          # 지역 격자 병행 트랙 (실험)
 ```
 
@@ -237,7 +237,6 @@ demo/
   run_serve.py          서빙 + 추천        ← 진입점
   run_check.py          회귀 점검 39항목    ← 진입점
   demo.py               v5 전체 실행 + legacy 해시 검증
-  demo_v2~v5.py         과거 검증 라운드 (이력 보존)
   config.py             경로 · 그룹 정의 · 기상 지점 · 분할 연도
 
   etl/
@@ -263,7 +262,9 @@ demo/
     plume_select.py       플룸 수용점 유형 선택
     plume_validation.py   플룸 적중률 검증 (lift 1.61 산출)
     figures.py            발표 그래프 6종 생성
-    v2~v5_*.py            과거 일회성 실험
+
+  archive/   과거 검증 라운드 v2~v5 (현역 파이프라인 밖 — archive/README.md 참조)
+    demo_v2~v5.py · v2_experiments · v3_aws · v4_diag14 · v4_metrics · v5_farms
 
   legacy/    ★ 수정 금지 — demo.py 가 원본과 SHA-256 대조
     plume.py · emission.py · diffusion.py · geo.py · kma.py · constants.py
