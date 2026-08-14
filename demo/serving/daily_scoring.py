@@ -52,7 +52,7 @@ def _fetch_forecast(nx: int, ny: int) -> tuple[dict, bool]:
     return mock_forecast.fetch_with_fallback(nx, ny), False
 
 
-def _grade(prob: float, cuts: dict) -> str:
+def _grade_legacy(prob: float, cuts: dict) -> str:
     if prob >= cuts["risk"]:
         return "위험"
     if prob >= cuts["watch"]:
@@ -60,8 +60,8 @@ def _grade(prob: float, cuts: dict) -> str:
     return "낮음"
 
 
-def _grade_v6(prob: float, cuts: dict, month: int | None = None) -> str:
-    """v6 등급 — 그 달의 컷으로 판정한다 (계절 드리프트 대응).
+def _grade(prob: float, cuts: dict, month: int | None = None) -> str:
+    """등급 — 그 달의 컷으로 판정한다 (계절 드리프트 대응).
 
     연간 분위수 하나로 고정하면 여름엔 거의 전부 '위험', 겨울엔 거의 전부 '낮음'이
     되어 등급이 정보를 잃는다. 월별 컷이 있으면 그것을 쓰고, 없으면 연간 컷으로
@@ -83,8 +83,8 @@ def _grade_v6(prob: float, cuts: dict, month: int | None = None) -> str:
     return "낮음"
 
 
-def run_v6(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
-    """v6 서빙 — 예보 → (1시간 x 그룹) 피처 → 그룹별 모델 → risk_calendar_v6.
+def run(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
+    """서빙 — 예보 → (1시간 x 그룹) 피처 → 그룹별 모델 → risk_hourly.
 
     hist_tail_h: 예보 앞에 이어붙일 관측 시간 수.
       시차(ws_lag1)와 무풍 연속시간(calm_streak)은 '직전 값'이 있어야 계산된다.
@@ -158,44 +158,44 @@ def run_v6(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
         p = full["model"].predict_proba(gb[full["features"]])[:, 1]
         for (_, r), pv in zip(gb.iterrows(), p):
             out.append((r["date"], int(r["hour"]), g, round(float(pv), 4),
-                        _grade_v6(float(pv), cuts, r["dt_h"].month),
-                        "full_v6", stamp))
+                        _grade(float(pv), cuts, r["dt_h"].month),
+                        "full", stamp))
 
     # 예보 원값 저장 — s5 의 플룸 그룹 선택이 시각별 바람을 쓴다
     src = "kma" if real_api else "mock"
-    db.upsert_forecast_v6(con, [
+    db.upsert_forecast(con, [
         (r["dt_h"].strftime("%Y-%m-%d"), int(r["dt_h"].hour), float(r["wd"]),
          float(r["ws"]), str(r.get("sky", "1")), float(r["temp"]),
          float(r["humid"]), int(r["rain"]), src, stamp)
         for _, r in fc.iterrows()])
 
-    # ── D+4~7 중기예보 (일 단위) → reduced_v6 모델 ──────────────────
+    # ── D+4~7 중기예보 (일 단위) → reduced 모델 ──────────────────
     n_mid = 0
     try:
-        n_mid = _append_mid_v6(con, now, stamp, fc["dt_h"].max())
+        n_mid = _append_midterm(con, now, stamp, fc["dt_h"].max())
     except FileNotFoundError:
-        finding("reduced_v6 모델 없음 — 중기예보 구간 생략 (train_model.run_v6 재실행 필요)")
+        finding("reduced 모델 없음 — 중기예보 구간 생략 (train_model.run 재실행 필요)")
     except Exception as e:
         finding(f"중기예보 처리 실패({e!r}) — 단기예보 구간만 제공")
 
-    db.upsert_risk_v6(con, out)
-    n = con.execute("SELECT COUNT(*) FROM risk_calendar_v6").fetchone()[0]
-    print(f"  run_v6: 단기 {len(fc)}시각 + 관측꼬리 {n_tail}시각 → {len(out)}행"
+    db.upsert_risk(con, out)
+    n = con.execute("SELECT COUNT(*) FROM risk_hourly").fetchone()[0]
+    print(f"  run: 단기 {len(fc)}시각 + 관측꼬리 {n_tail}시각 → {len(out)}행"
           f" · 중기 {n_mid}행 · 누적 {n}행")
     con.close()
     return {"n_upsert": len(out), "n_forecast_hours": len(fc),
             "tail_hours": n_tail, "n_mid_rows": n_mid, "real_api": real_api}
 
 
-def _append_mid_v6(con, now, stamp, last_short) -> int:
-    """중기예보 D+4~7 → reduced_v6 모델 → risk_calendar_v6.
+def _append_midterm(con, now, stamp, last_short) -> int:
+    """중기예보 D+4~7 → reduced 모델 → risk_hourly.
 
     중기예보는 일 단위(최저/최고기온·강수확률)라 풍향·풍속이 없다.
-    그래서 바람 없이 학습한 reduced_v6 모델을 따로 쓴다.
+    그래서 바람 없이 학습한 reduced 모델을 따로 쓴다.
     일 확률을 24시간에 복제하되, 시간 프로파일은 모델의 hour 피처가 만든다.
     """
     from config import GROUPS
-    from preprocess.build_features import REDUCED_FEATURES_V6
+    from preprocess.build_features import REDUCED_FEATURES
     from serving import kma_midterm
 
     mid = kma_midterm.fetch_mid(now)
@@ -206,7 +206,7 @@ def _append_mid_v6(con, now, stamp, last_short) -> int:
         # 폴백 — 단기예보 마지막 날을 D+4~7 로 복제 (mock 경로)
         finding("중기예보 API 미승인/실패 — 단기예보 일집계로 폴백 "
                 "(data.go.kr 에서 MidFcstInfoService 활용신청 필요)")
-        base = pd.read_sql("SELECT * FROM forecast_hourly_v6", con)
+        base = pd.read_sql("SELECT * FROM forecast_hourly", con)
         day = base.groupby("date").agg(temp=("temp", "mean"),
                                        rain=("rain", "max")).reset_index()
         mid = {}
@@ -216,7 +216,7 @@ def _append_mid_v6(con, now, stamp, last_short) -> int:
             mid[d.strftime("%Y-%m-%d")] = {"tmin": r["temp"] - 4, "tmax": r["temp"] + 4,
                                            "pop": 60.0 if r["rain"] else 10.0}
         mid_src, mid_real = "mock 일집계 (중기 API 미승인 폴백)", False
-    PROV.log("D4 중기예보", mid_src, real=mid_real, note="D+4~7 reduced_v6 모델 입력")
+    PROV.log("D4 중기예보", mid_src, real=mid_real, note="D+4~7 reduced 모델 입력")
 
     rows = []
     for day, v in mid.items():
@@ -240,16 +240,16 @@ def _append_mid_v6(con, now, stamp, last_short) -> int:
             red = pickle.load(fh)
         with open(MID_DIR / f"grade_cuts_{g}.json", encoding="utf-8") as fh:
             cuts = json.load(fh)
-        p = red["model"].predict_proba(mb[REDUCED_FEATURES_V6])[:, 1]
+        p = red["model"].predict_proba(mb[REDUCED_FEATURES])[:, 1]
         for (_, r), pv in zip(mb.iterrows(), p):
             out.append((r["date"], int(r["hour"]), g, round(float(pv), 4),
-                        _grade_v6(float(pv), cuts, int(md.dt.month.iloc[0])),
-                        "reduced_v6", stamp))
-    db.upsert_risk_v6(con, out)
+                        _grade(float(pv), cuts, int(md.dt.month.iloc[0])),
+                        "reduced", stamp))
+    db.upsert_risk(con, out)
     return len(out)
 
 
-def run(dummy: bool = True, now: datetime | None = None) -> dict:
+def run_legacy(dummy: bool = True, now: datetime | None = None) -> dict:
     con = db.connect()
     db.upsert_farm(con, DEMO_FARM)
     now = now or datetime.now()
@@ -285,7 +285,7 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
         cuts = {"risk": 0.8, "watch": 0.5}
         for _, r in blk.iterrows():
             p = rng.uniform(0, 1)
-            out.append((r["date"], int(r["block"]), round(p, 4), _grade(p, cuts), "dummy", stamp))
+            out.append((r["date"], int(r["block"]), round(p, 4), _grade_legacy(p, cuts), "dummy", stamp))
         model_note = "dummy(random.uniform)"
     else:
         with open(MID_DIR / "model_full.pkl", "rb") as fh:
@@ -311,7 +311,7 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
         p_full = full["model"].predict_proba(b[full["features"]])[:, 1]
         for (_, r), p in zip(b.iterrows(), p_full):
             out.append((r["date"], int(r["block"]), round(float(p), 4),
-                        _grade(float(p), cuts), "full", stamp))
+                        _grade_legacy(float(p), cuts), "full", stamp))
 
         # D+4~7: 중기예보 (serving/kma_midterm — KMA_KEY 있으면 실 API) + reduced 모델.
         # 중기예보는 일 단위라 블록 해상도가 없다 → 일 확률을 8블록에 복제.
@@ -347,11 +347,11 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
         p_red = reduced["model"].predict_proba(mb[reduced["features"]])[:, 1]
         for (_, r), p in zip(mb.iterrows(), p_red):
             out.append((r["date"], int(r["block"]), round(float(p), 4),
-                        _grade(float(p), cuts), "reduced", stamp))
+                        _grade_legacy(float(p), cuts), "reduced", stamp))
         PROV.log("D4 중기예보", mid_src, real=mid_real, note="D+4~7 reduced 모델 입력")
         model_note = f"full {len(p_full)}블록 + reduced {len(p_red)}블록"
 
-    db.upsert_risk(con, out)
+    db.upsert_risk_legacy(con, out)
     n = con.execute("SELECT COUNT(*) FROM risk_calendar").fetchone()[0]
     print(f"  daily_scoring({'dummy' if dummy else 'real model'}): {len(out)}블록 upsert, "
           f"risk_calendar 총 {n}행 — {model_note}")

@@ -1,4 +1,4 @@
-"""v6 서빙 + 추천 통합 실행 (검증용)."""
+"""서빙 + 추천 통합 실행 (검증용)."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -11,12 +11,12 @@ from advisor import recommend
 
 def main():
     use_utf8_stdout()
-    section("서빙 — 예보 → v6 모델 → risk_calendar_v6")
-    print(daily_scoring.run_v6())
+    section("서빙 — 예보 → 모델 → risk_hourly")
+    print(daily_scoring.run())
 
     section("추천 — 법령(미구현) → ML → 플룸 그룹선택 → 조합 → 등급")
     for wt, sp in [("액비살포", "돼지"), ("분뇨제거", "한우"), ("청소", "육계")]:
-        o = recommend.recommend_v6(wt, storage_days=12, tons=20.0,
+        o = recommend.recommend(wt, storage_days=12, tons=20.0,
                                       method="표면살포", tillage=False, species=sp)
         r, a = o["recommended"], o["avoid"]
         print(f"\n[{sp} 농가 · {wt}]  후보 {o['n_candidates']}시각")

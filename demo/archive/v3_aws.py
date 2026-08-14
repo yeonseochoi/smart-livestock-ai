@@ -16,8 +16,8 @@ from xgboost import XGBClassifier
 
 from config import (DATA_ROOT, MID_DIR, OUT_DIR, PROV, SEED,
                     WANGGUNG_LAT, WANGGUNG_LON, finding)
-from preprocess.build_features import FULL_FEATURES
-from model.train_model import weekly_ranking_hit
+from preprocess.build_features import FULL_FEATURES_LEGACY
+from model.train_model import weekly_ranking_hit_legacy
 from analysis.figures import _dist_m, _load_cloud
 
 # legacy import (수정 금지)
@@ -200,7 +200,7 @@ def exp10_ml(aws: pd.DataFrame) -> dict:
     test 를 1~7월로 제한하는 이유: v2 실험 4 — 서로 다른 계절 구성끼리의 성능
     비교는 착시를 만든다. 기존(전주) 대비 비교 가능하도록 월 구성을 통일한다.
     두 버전 모두 같은 (date, block) 교집합에서 학습·평가한다.
-    피처는 v3 지시 11 에 따라 연속변수 기본(FULL_FEATURES)을 쓴다.
+    피처는 v3 지시 11 에 따라 연속변수 기본(FULL_FEATURES_LEGACY)을 쓴다.
     """
     f_jj = _build_features(pd.read_parquet(MID_DIR / "weather_hourly.parquet"))
     f_aws = _build_features(aws)
@@ -223,10 +223,10 @@ def exp10_ml(aws: pd.DataFrame) -> dict:
                           subsample=0.9, colsample_bytree=0.9, scale_pos_weight=spw,
                           random_state=SEED, eval_metric="aucpr",
                           early_stopping_rounds=40)
-        m.fit(tr[FULL_FEATURES], tr["y_bin"],
-              eval_set=[(va[FULL_FEATURES], va["y_bin"])], verbose=False)
-        te = te.assign(proba=m.predict_proba(te[FULL_FEATURES])[:, 1])
-        hit, _ = weekly_ranking_hit(te, "proba")
+        m.fit(tr[FULL_FEATURES_LEGACY], tr["y_bin"],
+              eval_set=[(va[FULL_FEATURES_LEGACY], va["y_bin"])], verbose=False)
+        te = te.assign(proba=m.predict_proba(te[FULL_FEATURES_LEGACY])[:, 1])
+        hit, _ = weekly_ranking_hit_legacy(te, "proba")
         out[name] = {
             "pr_auc": round(float(average_precision_score(te["y_bin"], te["proba"])), 4),
             "roc_auc": round(float(roc_auc_score(te["y_bin"], te["proba"])), 4),

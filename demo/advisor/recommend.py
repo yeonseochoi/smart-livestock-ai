@@ -43,14 +43,14 @@ def storage_factor(days: int | None) -> float:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# v6 — (1시간 x 그룹) 캘린더 기반 추천
+# 현행 — (1시간 x 수용점 유형) 캘린더 기반 추천
 # ═══════════════════════════════════════════════════════════════════
 
-def _load_calendar_v6() -> dict:
+def _load_calendar() -> dict:
     """{그룹명: {시각: {prob, grade}}}"""
     con = db.connect()
     rows = con.execute(
-        "SELECT date, hour, grp, risk_prob, risk_grade FROM risk_calendar_v6"
+        "SELECT date, hour, grp, risk_prob, risk_grade FROM risk_hourly"
     ).fetchall()
     con.close()
     cal: dict = {}
@@ -65,7 +65,7 @@ def _load_forecast_wind() -> dict:
     con = db.connect()
     try:
         rows = con.execute(
-            "SELECT date, hour, wd, ws, sky FROM forecast_hourly_v6").fetchall()
+            "SELECT date, hour, wd, ws, sky FROM forecast_hourly").fetchall()
     except Exception:
         rows = []
     con.close()
@@ -76,7 +76,7 @@ def _load_forecast_wind() -> dict:
     return out
 
 
-def window_risk_v6(cal: dict, start: datetime) -> float | None:
+def window_risk(cal: dict, start: datetime) -> float | None:
     """1시간 격자이므로 TIME_WEIGHTS 6칸이 시각에 1:1 대응한다.
 
     v5 는 6개 가중치를 3시간 블록 2개에 뭉개 매핑했다. 1시간 격자에서는
@@ -114,11 +114,11 @@ def combine(vals: dict, rule: str = "max") -> float:
 COMBINE_RULES = ("max", "mean", "min", "first")
 
 
-def recommend_v6(work_type: str, storage_days: int | None = None,
+def recommend(work_type: str, storage_days: int | None = None,
                  tons: float = 20.0, method: str = "표면살포",
                  tillage: bool = False, species: str = "돼지",
                  farm_lat: float | None = None, farm_lon: float | None = None) -> dict:
-    """v6 추천.
+    """작업 시각 추천.
 
     ★ 배출량 절대값(kg NH3)은 출력하지 않는다.
       emission.py 는 액비(LIQUID_TN_DEFAULT = 2.0 kg-N/톤, 액비 사용 매뉴얼 실측)
@@ -133,9 +133,9 @@ def recommend_v6(work_type: str, storage_days: int | None = None,
     farm_lat = DEMO_FARM["lat"] if farm_lat is None else farm_lat
     farm_lon = DEMO_FARM["lon"] if farm_lon is None else farm_lon
 
-    cal_all = _load_calendar_v6()
+    cal_all = _load_calendar()
     if not cal_all:
-        raise RuntimeError("risk_calendar_v6 가 비어 있습니다 — daily_scoring.run_v6() 먼저")
+        raise RuntimeError("risk_hourly 가 비어 있습니다 — daily_scoring.run() 먼저")
     sf = storage_factor(storage_days)
     groups = list(cal_all)
     wind = _load_forecast_wind()          # {시각: {wd, ws, sky}}
@@ -146,7 +146,7 @@ def recommend_v6(work_type: str, storage_days: int | None = None,
     for t in sorted(cal_all[groups[0]]):
         vals = {}
         for g in groups:
-            wr = window_risk_v6(cal_all[g], t)
+            wr = window_risk(cal_all[g], t)
             if wr is None:
                 vals = {}
                 break
@@ -233,7 +233,13 @@ def recommend_v6(work_type: str, storage_days: int | None = None,
     return out
 
 
-def _load_calendar() -> dict[datetime, dict]:
+def _load_calendar_legacy() -> dict[datetime, dict]:
+    """구버전(3시간 블록) 전용. archive/ 스크립트만 쓴다.
+
+    읽는 risk_calendar 테이블은 현행 파이프라인이 더는 만들지 않는다
+    (현행은 risk_hourly). archive 를 그대로 돌리면 여기서 실패하는 게 정상이며,
+    조용히 신규 테이블을 읽어 잘못된 결과를 내는 것보다 낫다.
+    """
     con = db.connect()
     rows = con.execute(
         "SELECT date, block, risk_prob, risk_grade FROM risk_calendar").fetchall()
@@ -245,7 +251,7 @@ def _load_calendar() -> dict[datetime, dict]:
     return cal
 
 
-def window_risk(cal: dict[datetime, dict], start: datetime) -> float | None:
+def window_risk_legacy(cal: dict[datetime, dict], start: datetime) -> float | None:
     """TIME_WEIGHTS 는 시간 단위, 캘린더는 3시간 블록 단위 → t+j시간이 속한
     블록의 확률을 쓴다. 창(6시간)을 전부 못 덮으면 None(후보 제외, 규칙 ①)."""
     acc = w_sum = 0.0
@@ -259,17 +265,17 @@ def window_risk(cal: dict[datetime, dict], start: datetime) -> float | None:
     return acc / w_sum
 
 
-def recommend(work_type: str, storage_days: int | None = None,
+def recommend_legacy(work_type: str, storage_days: int | None = None,
               tons: float = 20.0, method: str = "표면살포") -> dict:
     if work_type not in WORK_WEIGHT:
         raise ValueError(f"작업유형은 {list(WORK_WEIGHT)} 중 하나")
 
-    cal = _load_calendar()
+    cal = _load_calendar_legacy()
     sf = storage_factor(storage_days)
 
     cands = []
     for t in sorted(cal):  # 시각 오름차순 → 동률이면 이른 시각 (규칙 ②)
-        wr = window_risk(cal, t)
+        wr = window_risk_legacy(cal, t)
         if wr is None:
             continue
         cands.append({"t": t, "window_risk": wr,

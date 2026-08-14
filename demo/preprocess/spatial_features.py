@@ -3,7 +3,7 @@
 각 (시각, 그룹|지역)에 대해 그 시각 풍향의 풍상측 부채꼴 안에 있는 축산농가 수를
 익산·김제 × 축종별로 센다. 사육두수는 쓰지 않는다 — 좌표만 쓴다.
 
-★ v6.1 변경 — 축종을 돼지만 세던 것을 돼지/소/가금으로 분리했다.
+★ 변경 — 축종을 돼지만 세던 것을 돼지/소/가금으로 분리했다.
   이유: 민원 라벨이 '가축 분뇨 냄새(닭, 돼지, 소)' 로 3축종 통합인데
         발원을 돼지 160곳(익산 전체의 13.4%)만 세는 것은 라벨과 정의가 어긋난다.
         축종별 악취 원인물질도 다르다(축산악취 관리 지침서: 우사 암모니아·황화수소·
@@ -100,7 +100,7 @@ def _fill_one(out, mask, la, lo, src):
 
 
 def run(lab: pd.DataFrame, save: bool = True) -> pd.DataFrame:
-    """v6 — 그룹 중심 기준."""
+    """그룹 중심 기준."""
     src = load_sources()
     out = lab.copy()
     for col in SPATIAL_FEATURES:
@@ -113,14 +113,14 @@ def run(lab: pd.DataFrame, save: bool = True) -> pd.DataFrame:
     for col in SPATIAL_FEATURES:
         out[col] = out[col].fillna(0.0)
     if save:
-        out.to_parquet(MID_DIR / "label_spatial_v6.parquet")
+        out.to_parquet(MID_DIR / "label_spatial.parquet")
     print("  공간 피처 %d개 — " % len(SPATIAL_FEATURES) + " · ".join(
         f"{c} 평균 {out[c].mean():.1f}" for c in SPATIAL_FEATURES[:6]))
     return out
 
 
 def run_regions(lab: pd.DataFrame, save: bool = True) -> pd.DataFrame:
-    """v6r — 지역 중심 기준."""
+    """지역 중심 기준."""
     from config import REGION_CENTER
     src = load_sources()
     out = lab.copy()
@@ -137,17 +137,17 @@ def run_regions(lab: pd.DataFrame, save: bool = True) -> pd.DataFrame:
     print(f"  풍향 1도 단위로 up_ik_pig 이 여러 값을 갖는 각도 수: "
           f"{int((chk > 1).sum())} / {len(chk)}")
     if save:
-        out.to_parquet(MID_DIR / "label_spatial_v6r.parquet")
+        out.to_parquet(MID_DIR / "label_spatial_regional.parquet")
     return out
 
 
 def add_prior_rate(lab: pd.DataFrame, key: str = "group") -> pd.DataFrame:
-    """직전 365일 민원율 3종.  key='group'(v6) 또는 'region'(v6r).
+    """직전 365일 민원율 3종.  key='group' 또는 'region'.
 
     ★ 반드시 '예측 시점 이전' 데이터로만 계산한다. shift(1) 없이 rolling 하면
       자기 자신이 포함되어 누수가 된다.
 
-    ⚠️ 한계 — 그룹이 2개뿐인 v6 에서 이 컬럼은 '지역 고유 요인'이 아니라
+    ⚠️ 한계 — 그룹이 2개뿐인 그룹 격자에서 이 컬럼은 '지역 고유 요인'이 아니라
       연도 추세의 대리변수로 작동한다(농촌근거리 2020년 0.0028 → 2025년 0.0369,
       13배 단조 증가). 학습 구간(≤2024) 최대 0.025 를 valid(2025) 가 넘어서
       트리가 외삽하지 못한다. 사용 시 반드시 이 한계를 병기할 것.
@@ -174,7 +174,7 @@ def add_prior_rate(lab: pd.DataFrame, key: str = "group") -> pd.DataFrame:
     return out
 
 
-def add_prior_rate_region(lab: pd.DataFrame) -> pd.DataFrame:
+def add_prior_rate_regional(lab: pd.DataFrame) -> pd.DataFrame:
     return add_prior_rate(lab, key="region")
 
 
