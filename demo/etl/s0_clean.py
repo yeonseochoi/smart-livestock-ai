@@ -67,8 +67,13 @@ def clean_complaints() -> pd.DataFrame:
 
 
 def clean_weather() -> pd.DataFrame:
-    w = pd.read_csv(WEATHER_CSV)
-    PROV.log("D2 기상 시간자료", WEATHER_CSV, real=True, note=f"{len(w):,}행")
+    from config import WEATHER_SOURCE, IKSAN_AWS_CSV
+    if WEATHER_SOURCE == "iksan_aws":
+        src, label = IKSAN_AWS_CSV, "D2 기상 시간자료 (익산 AWS 702)"
+    else:
+        src, label = WEATHER_CSV, "D2 기상 시간자료 (전주 ASOS 146)"
+    w = pd.read_csv(src)
+    PROV.log(label, src, real=True, note=f"{len(w):,}행")
 
     w["dt"] = pd.to_datetime(w["일시"])
     w = w.rename(columns={"기온C": "temp", "습도pct": "humid",

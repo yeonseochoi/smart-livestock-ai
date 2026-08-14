@@ -48,9 +48,28 @@ def _call(endpoint: str, reg_id: str, tmfc: str, key: str) -> dict | None:
         return None
 
 
+def _service_key() -> str | None:
+    """환경변수 우선, 없으면 legacy/kma.py 의 폴백 키를 쓴다.
+
+    ★ 수정 — 기존에는 KMA_KEY 미설정 시 무조건 None 을 돌려줘 중기예보가
+      항상 mock 으로 빠졌다. legacy/kma.py 에 폴백 서비스키가 이미 있으므로
+      그것을 재사용한다. 단, 그 키는 URL 인코딩된 문자열(%2F 등)이라
+      requests params= 로 넘기면 이중 인코딩(%25)이 되므로 먼저 unquote 한다.
+    """
+    k = os.environ.get("KMA_KEY")
+    if k:
+        return k
+    try:
+        from urllib.parse import unquote
+        import kma  # legacy (수정 금지, import 만)
+        return unquote(kma.SERVICE_KEY)
+    except Exception:
+        return None
+
+
 def fetch_mid(now: datetime | None = None) -> dict | None:
-    """D+4~7 의 {날짜: {tmin, tmax, pop}}. KMA_KEY 없거나 실패 시 None."""
-    key = os.environ.get("KMA_KEY")
+    """D+4~7 의 {날짜: {tmin, tmax, pop}}. 키 없거나 실패 시 None."""
+    key = _service_key()
     if not key:
         return None
     now = now or datetime.now()
@@ -77,9 +96,9 @@ def fetch_mid(now: datetime | None = None) -> dict | None:
 
 def probe_reg_ids(now: datetime | None = None) -> dict:
     """익산 전용 중기기온 코드 확인 — 후보를 실호출해 응답 유무를 본다."""
-    key = os.environ.get("KMA_KEY")
+    key = _service_key()
     if not key:
-        return {"error": "KMA_KEY 미설정 — 키 확보 후 실행"}
+        return {"error": "서비스키 없음"}
     tmfc = latest_tmfc(now)
     result = {}
     for reg in PROBE_CANDIDATES:
