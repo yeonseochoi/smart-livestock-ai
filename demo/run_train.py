@@ -37,7 +37,7 @@ def bootstrap_s0():
     if cpath.exists() and wpath.exists():
         print("  기존 S0 산출물 사용")
         return pd.read_parquet(cpath), pd.read_parquet(wpath)
-    from etl import clean_data
+    from preprocess import clean_data
     return clean_data.run()
 
 
@@ -45,7 +45,7 @@ def main():
     use_utf8_stdout()
     print("악취·분뇨 프로젝트 — v6 격자 재정의 (모델링까지)")
 
-    from etl import geocode_gimje, build_grid, build_features, spatial_features
+    from preprocess import geocode_gimje, build_grid, build_features, spatial_features
     from model import train_model
 
     section("v6-0 S0 — 민원·기상 정제")

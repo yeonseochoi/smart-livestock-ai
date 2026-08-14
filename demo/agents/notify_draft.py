@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from config import DEMO_FARM, PROV
-from ops import db
+from serving import db
 
 # legacy import (수정 금지)
 from diffusion import dispersion, wind_to_direction

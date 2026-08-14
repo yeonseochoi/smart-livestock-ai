@@ -66,8 +66,8 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
 
 | 파트 | 담당 영역 | 코드 | 실행/재현 |
 | --- | --- | --- | --- |
-| **A** | 데이터·모델 | `etl/`(clean_data → build_grid → build_features/spatial_features) → `model/train_model.py` | `python run_train.py`. 모델 실험은 `model/train_model.py` 하이퍼파라미터 + `etl/build_features.py` 피처 리스트 수정 |
-| **B** | 운영 배관 | `ops/` — db.py(SQLite), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m ops.scheduler --once` |
+| **A** | 데이터·모델 | `preprocess/`(clean_data → build_grid → build_features/spatial_features) → `model/train_model.py` | `python run_train.py`. 모델 실험은 `model/train_model.py` 하이퍼파라미터 + `preprocess/build_features.py` 피처 리스트 수정 |
+| **B** | 운영 배관 | `serving/` — db.py(SQLite), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
 | **C** | RAG | `rag/` — ingest.py(조문 청킹+위계 메타), search.py(ko-sroberta+위계 부스트), eval_qa_v2.py(30문항) | 평가 재실행: `python demo_v3.py` 의 v3-12 구간. 시행령 별표 원문(DOC) 도착 시 `python -m rag.reingest_annex <파일.docx>` |
 | **D** | 에이전트 | `agents/` — work_guide.py(작업 가이드), notify_draft.py(주민 알림), tools_schema.py(도구 6종 스키마) | demo.py ⑥ 구간. ANTHROPIC_API_KEY 설정 시 Claude tool use 로 전환되는 구조 |
 
@@ -126,7 +126,7 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
              grade_cuts_{유형}.json · group_center.json
                       │
 ╔═════════════════════│════════════════════════════════════════════════════════╗
-║  [B] 매일 서빙 — ops/daily_scoring.py                                        ║
+║  [B] 매일 서빙 — serving/daily_scoring.py                                        ║
 ╚═════════════════════│════════════════════════════════════════════════════════╝
                       │
    기상청 단기예보 API (D+1~3, 1시간, 약 83시점)
@@ -147,13 +147,13 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
    └────────┬───────────────────┘
             ▼
    ┌────────────────────────────────────┐
-   │  ops/db.py                         │
+   │  serving/db.py                         │
    │   risk_calendar_v6    PK(date,hour,grp)  ← grp 없으면 한 유형이 덮어써짐
    │   forecast_hourly_v6  예보 원값 (플룸 선택용)
    └────────┬───────────────────────────┘
             │
 ╔═══════════│══════════════════════════════════════════════════════════════════╗
-║  [C] 추천 — scoring/recommend.py                                          ║
+║  [C] 추천 — advisor/recommend.py                                          ║
 ╚═══════════│══════════════════════════════════════════════════════════════════╝
             │
    농가 입력 (작업유형 · 축종 · 살포량 · 공법 · 경운 · 저장경과일)
@@ -231,6 +231,11 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
 ## 파일 구조
 
 ```
+   흐름:  preprocess  →  model  →  serving  →  advisor
+          (전처리)      (학습)     (매일 채점)   (추천)
+```
+
+```
 demo/
   run_train.py          학습 실행          ← 진입점
   run_train_region.py   지역격자 병행 트랙  ← 진입점
@@ -239,26 +244,26 @@ demo/
   demo.py               v5 전체 실행 + legacy 해시 검증
   config.py             경로 · 그룹 정의 · 기상 지점 · 분할 연도
 
-  etl/
+  preprocess/           ── 데이터 준비
     clean_data.py       민원 xlsx · 기상 csv 정제
     geocode_gimje.py    김제 농가 리(里) 단위 재지오코딩
     build_grid.py       격자 생성 + 정답 라벨
     build_features.py   시차 · 야간 · 계절 피처
     spatial_features.py 풍상측 노출 + 직전1년 민원율
 
-  model/
+  model/                ── 학습
     train_model.py      XGBoost 학습 · 평가 · 등급컷
 
-  ops/
+  serving/              ── 매일 도는 채점 (예보 → 위험도 → DB)
     db.py               SQLite 스키마
     daily_scoring.py    예보 → 모델 → 위험도 → DB
     kma_midterm.py      중기예보 API
     scheduler.py        정기 실행
 
-  scoring/
-    recommend.py     6시간 창 · 플룸 선택 · 등급 · 조언
+  advisor/              ── 농가 요청 시 추천
+    recommend.py        6시간 창 · 플룸 선택 · 등급 · 조언
 
-  analysis/
+  analysis/             ── 분석 · 검증
     plume_select.py       플룸 수용점 유형 선택
     plume_validation.py   플룸 적중률 검증 (lift 1.61 산출)
     figures.py            발표 그래프 6종 생성
@@ -349,8 +354,8 @@ demo/
 - [ ] `rules/spread_rules.py` 법령 하드필터
 - [ ] RAG 인덱스 ① 살포 판정 (원료 PDF는 `03_RAG_법령매뉴얼/0814 추가문서/` 에 확보됨)
 - [ ] RAG 인덱스 ② 저감 팁
-- [ ] `scoring/s6_cases.py` 유사사례 검색
-- [ ] `ops/farm_input.py` 피트 수위 추정 (두당 발생 원단위 확인 필요)
+- [ ] `advisor/s6_cases.py` 유사사례 검색
+- [ ] `serving/farm_input.py` 피트 수위 추정 (두당 발생 원단위 확인 필요)
 - [ ] 중기예보 활용신청 — `data.go.kr` → `MidFcstInfoService`
 - [ ] **API 키 재발급** (최우선)
 
@@ -362,5 +367,5 @@ demo/
 | --- | --- |
 | 농가 허가 대장 실좌표 | `python -m analysis.plume_validation <좌표.csv>` → 플룸 재판정 |
 | 가축분뇨법 시행령 원문(DOC) | `python -m rag.reingest_annex <파일.docx>` |
-| KMA_KEY | `setx KMA_KEY <키>` 후 `python -m ops.kma_midterm --probe` |
+| KMA_KEY | `setx KMA_KEY <키>` 후 `python -m serving.kma_midterm --probe` |
 | 과거 단기예보 자료 | 예보 열화 백테스트 |

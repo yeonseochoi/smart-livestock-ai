@@ -31,7 +31,7 @@ RESULTS: dict = {}
 
 def step1_etl():
     section("① S0~S1 — 데이터 정제 → 라벨 테이블 (실데이터)")
-    from etl import clean_data, build_grid
+    from preprocess import clean_data, build_grid
     c, w = clean_data.run()
     lab = build_grid.run(c, w)
     RESULTS["s0_s1"] = {"complaints": len(c), "weather": len(w),
@@ -42,7 +42,7 @@ def step1_etl():
 
 def step2_pipe():
     section("② S4 — 운영 배관 더미 관통 (모델 없이 전 구간 확인)")
-    from ops import daily_scoring
+    from serving import daily_scoring
     RESULTS["s4_dummy"] = daily_scoring.run(dummy=True)
 
 
@@ -58,7 +58,7 @@ def step3_rag():
 
 def step4_model(lab):
     section("④ S2~S3 — 피처 엔지니어링 → 모델 학습·평가")
-    from etl import build_features
+    from preprocess import build_features
     from model import train_model
     feat = build_features.run(lab)
     res = train_model.run(feat)
@@ -97,8 +97,8 @@ def step6_agents(rag_index, c, w):
 
 def step7_integrate(c=None):
     section("⑦ S5 — 통합: 실모델 교체 → 작업 창 추천 + S8-5 백테스트")
-    from ops import daily_scoring
-    from scoring import recommend
+    from serving import daily_scoring
+    from advisor import recommend
     from analysis import figures
 
     RESULTS["s4_real"] = daily_scoring.run(dummy=False)

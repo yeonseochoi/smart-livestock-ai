@@ -3,8 +3,8 @@
 매일 06:00 (단기예보 05시 발표 + 여유) 에 daily_scoring(실모델) 실행.
 실패해도 스케줄러는 죽지 않고 이전 캘린더를 유지한다 (계획서 S4 요구).
 
-    python -m ops.scheduler          # 상시 구동 (Ctrl+C 종료)
-    python -m ops.scheduler --once   # 즉시 1회 실행 후 종료 (데모·검증용)
+    python -m serving.scheduler          # 상시 구동 (Ctrl+C 종료)
+    python -m serving.scheduler --once   # 즉시 1회 실행 후 종료 (데모·검증용)
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ RUN_HOUR = 6
 
 
 def job() -> None:
-    from ops import daily_scoring
+    from serving import daily_scoring
     try:
         res = daily_scoring.run(dummy=False)
         print(f"[{datetime.now():%Y-%m-%d %H:%M}] daily_scoring 성공: {res['model']}")

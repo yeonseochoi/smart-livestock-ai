@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from config import DEMO_FARM, MID_DIR, PROV, SEED, finding
-from ops import db
+from serving import db
 
 # legacy import (수정 금지, import 만)
 from geo import latlon_to_grid
@@ -92,8 +92,8 @@ def run_v6(now: datetime | None = None, hist_tail_h: int = 48) -> dict:
       안 하면 서빙에서 calm_streak 이 항상 0 에서 시작해 학습 분포와 어긋난다.
     """
     from config import GROUPS
-    from etl import spatial_features
-    from etl.build_features import build_serving_features
+    from preprocess import spatial_features
+    from preprocess.build_features import build_serving_features
 
     con = db.connect()
     db.upsert_farm(con, DEMO_FARM)
@@ -195,8 +195,8 @@ def _append_mid_v6(con, now, stamp, last_short) -> int:
     일 확률을 24시간에 복제하되, 시간 프로파일은 모델의 hour 피처가 만든다.
     """
     from config import GROUPS
-    from etl.build_features import REDUCED_FEATURES_V6
-    from ops import kma_midterm
+    from preprocess.build_features import REDUCED_FEATURES_V6
+    from serving import kma_midterm
 
     mid = kma_midterm.fetch_mid(now)
     if mid is not None:
@@ -313,9 +313,9 @@ def run(dummy: bool = True, now: datetime | None = None) -> dict:
             out.append((r["date"], int(r["block"]), round(float(p), 4),
                         _grade(float(p), cuts), "full", stamp))
 
-        # D+4~7: 중기예보 (ops/kma_midterm — KMA_KEY 있으면 실 API) + reduced 모델.
+        # D+4~7: 중기예보 (serving/kma_midterm — KMA_KEY 있으면 실 API) + reduced 모델.
         # 중기예보는 일 단위라 블록 해상도가 없다 → 일 확률을 8블록에 복제.
-        from ops import kma_midterm
+        from serving import kma_midterm
         mid = kma_midterm.fetch_mid(now)
         mid_rows = []
         if mid is not None:

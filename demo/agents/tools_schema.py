@@ -8,8 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from config import DEMO_FARM, PROV
-from ops import db
-from scoring.recommend import window_risk, _load_calendar, WORK_WEIGHT, storage_factor
+from serving import db
+from advisor.recommend import window_risk, _load_calendar, WORK_WEIGHT, storage_factor
 
 # legacy import (수정 금지)
 from diffusion import dispersion

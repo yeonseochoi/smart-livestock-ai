@@ -81,9 +81,9 @@ chk("등급이 3종", set(d.risk_grade) <= {"낮음","주의","위험"}, str(d.r
 con.close()
 
 print("\n" + "=" * 78); print(" 6. 서빙 피처 분포가 학습과 어긋나지 않는가"); print("=" * 78)
-from ops import daily_scoring
-from etl import spatial_features
-from etl.build_features import build_serving_features
+from serving import daily_scoring
+from preprocess import spatial_features
+from preprocess.build_features import build_serving_features
 import mock_forecast
 from geo import latlon_to_grid
 from config import DEMO_FARM
@@ -117,7 +117,7 @@ for c in ["up_ik_pig", "up_gj_pig", "calm_streak", "ws_lag1"]:
         f"학습 [{lo:.1f}~{hi:.1f}] · 서빙 [{b[c].min():.1f}~{b[c].max():.1f}]")
 
 print("\n" + "=" * 78); print(" 7. 추천"); print("=" * 78)
-from scoring import recommend
+from advisor import recommend
 r = recommend.recommend_v6("액비살포", storage_days=12, species="돼지")
 chk("추천 산출", "recommended" in r, r["recommended"]["t"])
 chk("회피 시각이 추천보다 위험", r["avoid"]["final"] > r["recommended"]["final"])

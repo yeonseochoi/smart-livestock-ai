@@ -61,7 +61,7 @@ def run(lab: pd.DataFrame) -> pd.DataFrame:
 # v6 — 시차·무풍 + 공간 + 직전1년 민원율
 # ═══════════════════════════════════════════════════════════════════
 
-from etl.spatial_features import SPATIAL_FEATURES, PRIOR_FEATURES  # noqa: E402
+from preprocess.spatial_features import SPATIAL_FEATURES, PRIOR_FEATURES  # noqa: E402
 
 # v5 유산 — 기존 트랙 재현용. 절대 수정하지 말 것. (= 위의 FULL_FEATURES)
 FULL_FEATURES_V5 = list(FULL_FEATURES)

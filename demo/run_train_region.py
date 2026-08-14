@@ -26,7 +26,7 @@ def main():
     use_utf8_stdout()
     print("악취·분뇨 프로젝트 — v6r 지역 격자 (모델링까지)")
 
-    from etl import clean_data, geocode_gimje, build_grid, build_features, spatial_features
+    from preprocess import clean_data, geocode_gimje, build_grid, build_features, spatial_features
     from model import train_model
 
     section("v6r-0 S0 — 민원·기상")

@@ -5,8 +5,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import section, DEMO_FARM
 from console import use_utf8_stdout
-from ops import daily_scoring
-from scoring import recommend
+from serving import daily_scoring
+from advisor import recommend
 
 
 def main():

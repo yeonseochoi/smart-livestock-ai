@@ -50,7 +50,7 @@ def run_rag_v2():
 
 def check_design_changes():
     section("v2-5/6 설계 변경 확인")
-    from scoring import recommend
+    from advisor import recommend
     from agents import notify_draft
     from datetime import timedelta
     print(f"  PLUME_GRADE_BUMP = {PLUME_GRADE_BUMP} (기본 OFF)")

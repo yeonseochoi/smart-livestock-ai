@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from config import DEMO_FARM, PLUME_GRADE_BUMP, PROV, finding
-from ops import db
+from serving import db
 
 # legacy import (수정 금지)
 from constants import TIME_WEIGHTS

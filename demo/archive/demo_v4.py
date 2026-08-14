@@ -5,7 +5,7 @@ python demo_v4.py  (demo.py 선실행 필요)
 14. [최우선] "왕궁 3km 내 10건" 재검증 → 원인 규명 → 좌표 교정 → 플룸 전면 재실행
 15. 다중 발원 플룸 하네스 (analysis/plume_validation.py) — 템플릿으로 가동 검증
 16. RAG 별표 재추출 준비 (rag/reingest_annex.py) — 대기 모드 점검
-17. 조립: ops/kma_midterm.py + ops/scheduler.py, daily_scoring 연결 검증
+17. 조립: serving/kma_midterm.py + serving/scheduler.py, daily_scoring 연결 검증
 18. ROC-AUC 병기 + 리프트 차트
 
 출력: out/validation_report_v4.md, out/v4_results.json,
@@ -66,7 +66,7 @@ def main():
     print("  원문 도착 시: python -m rag.reingest_annex <시행령.docx|pdf>")
 
     section("v4-17 조립: kma_midterm + scheduler")
-    from ops import kma_midterm
+    from serving import kma_midterm
     import os
     R["kma_midterm"] = {
         "land_reg": kma_midterm.MID_LAND_REG_ID, "ta_reg": kma_midterm.MID_TA_REG_ID,
@@ -77,7 +77,7 @@ def main():
           f"기온 {R['kma_midterm']['ta_reg']} [A, 전주 — 익산 코드는 --probe 로 확정]")
     print(f"  발표시각 계산: tmFc={R['kma_midterm']['tmfc_now']} / "
           f"실 API: {'연결됨' if R['kma_midterm']['live'] else 'KMA_KEY 대기 (mock 폴백 동작)'}")
-    from ops import scheduler
+    from serving import scheduler
     scheduler.job()   # --once 경로 검증 (실모델 daily_scoring 관통)
     R["scheduler_once_ok"] = True
 
@@ -194,16 +194,16 @@ S8-4 플룸 적중 {R['s8_4_fixed']['hit']:.3f} vs 플라시보 {R['s8_4_fixed']
 
 ## 17. 조립 진행 — 중기예보 클라이언트 + 상시 스케줄러
 
-- **ops/kma_midterm.py**: getMidLandFcst + getMidTa, 발표시각(06/18시) 자동 계산,
+- **serving/kma_midterm.py**: getMidLandFcst + getMidTa, 발표시각(06/18시) 자동 계산,
   D+4~7 {{tmin, tmax, pop}} 반환. daily_scoring 에 연결 완료 — KMA_KEY 가 설정되면
   자동으로 실 API, 없으면 mock 폴백(현재 상태: {"실 API 연결" if R['kma_midterm']['live'] else "키 대기, mock 폴백 검증됨"}).
 - **구역코드 상수화**: 중기육상(강수확률) 전라북도 = **{R['kma_midterm']['land_reg']}** [A],
   중기기온 = **{R['kma_midterm']['ta_reg']}** (전주) [A]. **익산 전용 기온 코드는 공개
   코드표에서 확정하지 못했다** — 가이드 코드표(활용가이드 한글파일)의 전북 항목
-  재확인이 필요하며, 키 확보 즉시 `python -m ops.kma_midterm --probe` 가 후보
+  재확인이 필요하며, 키 확보 즉시 `python -m serving.kma_midterm --probe` 가 후보
   11F10202~11 을 실호출해 자동 확정한다. 중기기온의 min/max 중 무엇을 피처로
   쓸지는 계획서 미규정(v2 허점 2)이라 평균 사용 [C] 로 명시했다.
-- **ops/scheduler.py**: APScheduler 상시 구동(매일 06:00, misfire 1시간 유예,
+- **serving/scheduler.py**: APScheduler 상시 구동(매일 06:00, misfire 1시간 유예,
   실패 시 이전 캘린더 유지) + `--once` 검증 모드. 본 실행에서 `--once` 경로로
   실모델 daily_scoring 관통 확인.
 
