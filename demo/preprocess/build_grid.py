@@ -1,12 +1,12 @@
 """S1 — 라벨 테이블.
 
 run()     v5 — (날짜 x 3시간 블록) 그리드.  절대 수정하지 않는다 (두 트랙 유지).
-run_v6()  v6 — (그룹 x 1시간) 그리드.
+run()  현행 — (1시간 x 수용점 유형) 그리드.
 
 [구현 편차] 문서 13-4 는 run() 을 직접 대폭 수정하라고 지시하지만, 같은 문서
 13-4 수정5 가 "v5 파이프라인(demo.py, demo_v5.py)이 새 스키마를 읽고 깨지므로
 두 트랙을 나란히 유지한다"고 못박는다. run() 을 고치면 그 원칙이 즉시 깨진다.
-→ 지시 내용(격자·라벨·기상조인·검증문·저장)은 100% 반영하되 run_v6() 로 분리했다.
+→ 지시 내용(격자·라벨·기상조인·검증문·저장)은 100% 반영하되 run() 로 분리했다.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import pandas as pd
 from config import MID_DIR, finding
 
 
-def run(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
+def run_legacy(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     # 1. 그리드: 2020-01-01 ~ 2026-07-31 x 블록 0~7
     dates = pd.date_range("2020-01-01", "2026-07-31", freq="D")
     grid = pd.MultiIndex.from_product(
@@ -63,10 +63,10 @@ def run(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# v6 — (그룹, 1시간) 격자
+# 현행 — (1시간, 수용점 유형) 격자
 # ═══════════════════════════════════════════════════════════════════
 
-def run_v6(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
+def run(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     from config import GROUPS, GROUP_CENTER, REGION_GROUP
 
     # 1. 1시간 격자 x 그룹.
@@ -142,15 +142,15 @@ def run_v6(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
         print(f"    {gname}: 양성 {int(gdf['y_bin'].sum()):,}행 / "
               f"{len(gdf):,}행 = {gdf['y_bin'].mean():.4f}")
 
-    lab.to_parquet(MID_DIR / "label_table_v6.parquet")
+    lab.to_parquet(MID_DIR / "label_table.parquet")
     return lab
 
 
 # ═══════════════════════════════════════════════════════════════════
-# v6r — (지역, 1시간) 격자.  그룹은 '모델을 나누는 축'으로만 남는다.
+# 지역 격자 — (1시간, 지역).  그룹은 '모델을 나누는 축'으로만 남는다.
 # ═══════════════════════════════════════════════════════════════════
 
-def run_v6r(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
+def run_regional(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     from config import REGIONS, REGION_GROUP_R, REGION_CENTER
 
     w_min = weather["dt"].min().floor("h")
@@ -204,5 +204,5 @@ def run_v6r(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
         print(f"    {g}: 지역 {gd['region'].nunique()}개 · {len(gd):,}행 · "
               f"양성 {int(gd['y_bin'].sum()):,} ({gd['y_bin'].mean():.4f})")
 
-    lab.to_parquet(MID_DIR / "label_table_v6r.parquet")
+    lab.to_parquet(MID_DIR / "label_table_regional.parquet")
     return lab

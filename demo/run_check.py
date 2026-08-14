@@ -13,9 +13,23 @@ def chk(name, cond, detail=""):
     (OK if cond else NG).append(name)
     print(f"  [{'OK' if cond else 'NG'}] {name}" + (f"  — {detail}" if detail else ""))
 
-print("=" * 78); print(" 1. 학습 산출물"); print("=" * 78)
-f = pd.read_parquet(MID_DIR / "features_v6.parquet")
-chk("features_v6 존재", len(f) > 0, f"{len(f):,}행")
+print("\n" + "=" * 78); print(" 0. legacy 무결성 (절대규칙 3)"); print("=" * 78)
+import hashlib, config as _cfg
+_src = _cfg.PROJECT_DIR / "작업폴더" / "최종구현 py파일"
+if not _src.exists():
+    print("  [skip] 원본 폴더 없음 — 배포본에서는 대조 불가 "
+          f"({_src})")
+else:
+    _bad = [f.name for f in sorted(_cfg.LEGACY_DIR.glob("*.py"))
+            if (_src / f.name).exists()
+            and hashlib.sha256(f.read_bytes()).hexdigest()
+            != hashlib.sha256((_src / f.name).read_bytes()).hexdigest()]
+    chk("legacy/ 가 원본과 바이트 동일", not _bad,
+        "불일치: " + ", ".join(_bad) if _bad else "전 파일 일치")
+
+print("\n" + "=" * 78); print(" 1. 학습 산출물"); print("=" * 78)
+f = pd.read_parquet(MID_DIR / "features.parquet")
+chk("features 존재", len(f) > 0, f"{len(f):,}행")
 chk("y_sev 최솟값 >= 1  (0이면 음성 가중치 0 → 학습 붕괴)",
     int(f["y_sev"].min()) >= 1, f"min={int(f['y_sev'].min())}")
 chk("y_bin 이 0/1 만", set(f["y_bin"].unique()) <= {0, 1})
@@ -49,7 +63,7 @@ print("\n" + "=" * 78); print(" 3. 학습 피처 == 서빙 피처"); print("=" *
 for g in GROUPS:
     M = pickle.load(open(MID_DIR / f"model_{g}_full.pkl", "rb"))
     chk(f"{g} 모델 로드", "model" in M and "features" in M, f"{len(M['features'])}개 피처")
-    chk(f"{g} 피처가 features_v6 에 전부 존재",
+    chk(f"{g} 피처가 features 에 전부 존재",
         all(c in f.columns for c in M["features"]))
 feat_sets = [tuple(pickle.load(open(MID_DIR / f"model_{g}_full.pkl", "rb"))["features"]) for g in GROUPS]
 chk("두 그룹 모델의 피처 목록·순서 동일", feat_sets[0] == feat_sets[1])
@@ -68,10 +82,10 @@ for g in GROUPS:
 
 print("\n" + "=" * 78); print(" 5. 서빙 DB"); print("=" * 78)
 con = sqlite3.connect(DB_PATH)
-sch = con.execute("SELECT sql FROM sqlite_master WHERE name='risk_calendar_v6'").fetchone()
-chk("risk_calendar_v6 스키마 PK(date,hour,grp)",
+sch = con.execute("SELECT sql FROM sqlite_master WHERE name='risk_hourly'").fetchone()
+chk("risk_hourly 스키마 PK(date,hour,grp)",
     sch and "PRIMARY KEY(date, hour, grp)" in sch[0])
-d = pd.read_sql("SELECT * FROM risk_calendar_v6", con)
+d = pd.read_sql("SELECT * FROM risk_hourly", con)
 chk("서빙 결과 적재됨", len(d) > 0, f"{len(d)}행")
 chk("두 그룹 모두 적재", set(d["grp"]) == set(GROUPS))
 chk("시각당 그룹 2행 (덮어쓰기 없음)",
@@ -118,7 +132,7 @@ for c in ["up_ik_pig", "up_gj_pig", "calm_streak", "ws_lag1"]:
 
 print("\n" + "=" * 78); print(" 7. 추천"); print("=" * 78)
 from advisor import recommend
-r = recommend.recommend_v6("액비살포", storage_days=12, species="돼지")
+r = recommend.recommend("액비살포", storage_days=12, species="돼지")
 chk("추천 산출", "recommended" in r, r["recommended"]["t"])
 chk("회피 시각이 추천보다 위험", r["avoid"]["final"] > r["recommended"]["final"])
 chk("6시간 창 후보 존재", r["n_candidates"] > 0, f"{r['n_candidates']}개")
@@ -131,7 +145,7 @@ chk("플룸이 그룹을 좁힌 시각 존재", r["plume_selected_hours"] > 0,
     f"{r['plume_selected_hours']}/{r['n_candidates']}")
 chk("플룸 판정 방법 기록", "plume_method" in r["recommended"],
     r["recommended"]["plume_method"])
-r2 = recommend.recommend_v6("청소", species="육계")
+r2 = recommend.recommend("청소", species="육계")
 chk("육계에는 액상공법 조언 없음", not any("주입식" in t for t in r2["reduction_tips"]),
     str(r2["reduction_tips"]))
 

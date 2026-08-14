@@ -17,10 +17,10 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 from config import MID_DIR, OUT_DIR, SEED, finding
-from preprocess.build_features import BINARY_FULL_FEATURES, FULL_FEATURES, REDUCED_FEATURES
+from preprocess.build_features import (BINARY_FULL_FEATURES_LEGACY, FULL_FEATURES_LEGACY, REDUCED_FEATURES_LEGACY)
 
 
-def weekly_ranking_hit(df: pd.DataFrame, proba_col: str, frac: float = 0.2) -> tuple[float, pd.DataFrame]:
+def weekly_ranking_hit_legacy(df: pd.DataFrame, proba_col: str, frac: float = 0.2) -> tuple[float, pd.DataFrame]:
     """각 주의 블록을 위험도 내림차순 정렬 → 실제 민원 블록이 상위 20%에 든 비율.
 
     계획서는 '56개 블록, k=11'로 고정했지만 기상 결측 drop 으로 주당 블록 수가
@@ -41,7 +41,7 @@ def weekly_ranking_hit(df: pd.DataFrame, proba_col: str, frac: float = 0.2) -> t
     return (float(wk_df["hit"].mean()) if len(wk_df) else float("nan")), wk_df
 
 
-def run(feat: pd.DataFrame) -> dict:
+def run_legacy(feat: pd.DataFrame) -> dict:
     f = feat.copy()
     year = f["date"].dt.year
     tr = f[year <= 2024]
@@ -54,8 +54,8 @@ def run(feat: pd.DataFrame) -> dict:
     models: dict = {}
 
     # "full" = 연속변수 기본 모델 (v3 지시 11 승격), "full_binary" = 이진 플래그 백업
-    for name, feats in [("full", FULL_FEATURES), ("full_binary", BINARY_FULL_FEATURES),
-                        ("reduced", REDUCED_FEATURES)]:
+    for name, feats in [("full", FULL_FEATURES_LEGACY), ("full_binary", BINARY_FULL_FEATURES_LEGACY),
+                        ("reduced", REDUCED_FEATURES_LEGACY)]:
         m = XGBClassifier(
             n_estimators=400, max_depth=5, learning_rate=0.05,
             subsample=0.9, colsample_bytree=0.9,
@@ -69,7 +69,7 @@ def run(feat: pd.DataFrame) -> dict:
             p = m.predict_proba(d[feats])[:, 1]
             d = d.assign(proba=p)
             prauc = float(average_precision_score(d["y_bin"], p))
-            hit, wk = weekly_ranking_hit(d, "proba")
+            hit, wk = weekly_ranking_hit_legacy(d, "proba")
             results[f"{name}_{split_name}"] = {
                 "pr_auc": round(prauc, 4), "weekly_hit": round(hit, 4),
                 "pos_rate": round(float(d["y_bin"].mean()), 4),
@@ -83,13 +83,13 @@ def run(feat: pd.DataFrame) -> dict:
             pickle.dump({"model": m, "features": feats}, fh)
 
     # 베이스라인: 로지스틱 회귀 (full 피처)
-    sc = StandardScaler().fit(tr[FULL_FEATURES])
+    sc = StandardScaler().fit(tr[FULL_FEATURES_LEGACY])
     lr = LogisticRegression(max_iter=1000, class_weight="balanced", random_state=SEED)
-    lr.fit(sc.transform(tr[FULL_FEATURES]), tr["y_bin"])
+    lr.fit(sc.transform(tr[FULL_FEATURES_LEGACY]), tr["y_bin"])
     for split_name, d in [("valid", va), ("test", te)]:
-        p = lr.predict_proba(sc.transform(d[FULL_FEATURES]))[:, 1]
+        p = lr.predict_proba(sc.transform(d[FULL_FEATURES_LEGACY]))[:, 1]
         d = d.assign(proba=p)
-        hit, _ = weekly_ranking_hit(d, "proba")
+        hit, _ = weekly_ranking_hit_legacy(d, "proba")
         results[f"logit_{split_name}"] = {
             "pr_auc": round(float(average_precision_score(d["y_bin"], p)), 4),
             "weekly_hit": round(hit, 4),
@@ -112,20 +112,20 @@ def run(feat: pd.DataFrame) -> dict:
         import xgboost as xgb
         plt.rcParams["font.family"] = "Malgun Gothic"
         plt.rcParams["axes.unicode_minus"] = False
-        sample = va[FULL_FEATURES].sample(min(2000, len(va)), random_state=SEED)
+        sample = va[FULL_FEATURES_LEGACY].sample(min(2000, len(va)), random_state=SEED)
         contrib = models["full"].get_booster().predict(
             xgb.DMatrix(sample), pred_contribs=True)
         sv = contrib[:, :-1]  # 마지막 열은 bias
         mean_abs = np.abs(sv).mean(axis=0)
         order = np.argsort(mean_abs)[::-1][:5]
         fig, ax = plt.subplots(figsize=(7, 4))
-        ax.barh([FULL_FEATURES[i] for i in order][::-1], mean_abs[order][::-1])
+        ax.barh([FULL_FEATURES_LEGACY[i] for i in order][::-1], mean_abs[order][::-1])
         ax.set_title("SHAP 평균 |기여도| 상위 5 (full 모델, valid 표본)")
         ax.set_xlabel("mean |SHAP value|")
         fig.tight_layout()
         fig.savefig(OUT_DIR / "s3_shap_top5.png", dpi=130)
         plt.close(fig)
-        results["shap_top5"] = [FULL_FEATURES[i] for i in order]
+        results["shap_top5"] = [FULL_FEATURES_LEGACY[i] for i in order]
     except Exception as e:  # SHAP 실패해도 파이프라인은 계속
         finding(f"SHAP 계산 실패({e!r}) — 그래프 생략")
 
@@ -139,10 +139,10 @@ def run(feat: pd.DataFrame) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# v6 — 그룹별 학습 + grouped CV
+# 현행 — 그룹별 학습 + grouped CV
 # ═══════════════════════════════════════════════════════════════════
 
-def weekly_ranking_hit_v6(df: pd.DataFrame, proba_col: str,
+def weekly_ranking_hit(df: pd.DataFrame, proba_col: str,
                           frac: float = 0.2) -> tuple[float, pd.DataFrame]:
     """v5 와 동일하지만 date 대신 dt_h 로 주를 만든다."""
     d = df.copy()
@@ -223,7 +223,7 @@ def _run_one_group(f: pd.DataFrame, gname: str, feats: list) -> dict:
     for split_name, d in [("valid", va), ("test", te)]:
         p = m.predict_proba(d[feats])[:, 1]
         d = d.assign(proba=p)
-        hit, _ = weekly_ranking_hit_v6(d, "proba")
+        hit, _ = weekly_ranking_hit(d, "proba")
         res[split_name] = {
             "pr_auc": round(float(average_precision_score(d["y_bin"], p)), 4),
             "weekly_hit": round(hit, 4),
@@ -265,25 +265,25 @@ def _run_one_group(f: pd.DataFrame, gname: str, feats: list) -> dict:
         pickle.dump({"model": m, "features": feats}, fh)
 
     # ── reduced 모델 (중기예보 D+4~7 용) — 바람 없이 학습 ──────────────
-    from preprocess.build_features import REDUCED_FEATURES_V6
+    from preprocess.build_features import REDUCED_FEATURES
     mr = XGBClassifier(
         n_estimators=300, max_depth=4, learning_rate=0.05,
         subsample=0.9, colsample_bytree=0.9, scale_pos_weight=spw,
         random_state=SEED, eval_metric="aucpr", early_stopping_rounds=40,
         tree_method="hist", n_jobs=-1,
     )
-    mr.fit(tr[REDUCED_FEATURES_V6], tr["y_bin"], sample_weight=tr["y_sev"],
-           eval_set=[(va[REDUCED_FEATURES_V6], va["y_bin"])],
+    mr.fit(tr[REDUCED_FEATURES], tr["y_bin"], sample_weight=tr["y_sev"],
+           eval_set=[(va[REDUCED_FEATURES], va["y_bin"])],
            sample_weight_eval_set=[va["y_sev"]], verbose=False)
-    pr_te = mr.predict_proba(te[REDUCED_FEATURES_V6])[:, 1]
+    pr_te = mr.predict_proba(te[REDUCED_FEATURES])[:, 1]
     res["reduced"] = {
-        "features": REDUCED_FEATURES_V6,
+        "features": REDUCED_FEATURES,
         "test_pr_auc": round(float(average_precision_score(te["y_bin"], pr_te)), 4),
         "test_lift": round(float(average_precision_score(te["y_bin"], pr_te))
                            / float(te["y_bin"].mean()), 2),
     }
     with open(MID_DIR / f"model_{gname}_reduced.pkl", "wb") as fh:
-        pickle.dump({"model": mr, "features": REDUCED_FEATURES_V6}, fh)
+        pickle.dump({"model": mr, "features": REDUCED_FEATURES}, fh)
     print(f"          reduced(중기용) test PR-AUC {res['reduced']['test_pr_auc']} "
           f"(lift {res['reduced']['test_lift']}배) · 월별 컷 {len(cuts['monthly'])}개")
     return res
@@ -302,10 +302,10 @@ def _fit(tr, va, feats, spw, seed: int = SEED):
     return m
 
 
-def grouped_cv_region(f: pd.DataFrame, feats: list, n_folds: int = 3) -> dict:
-    """지역을 통째로 빼고 학습 → 그 지역을 맞힌다. v6r 에서는 실제로 작동한다.
+def grouped_cv_regional(f: pd.DataFrame, feats: list, n_folds: int = 3) -> dict:
+    """지역을 통째로 빼고 학습 → 그 지역을 맞힌다. 지역 격자에서는 실제로 작동한다.
 
-    v6(그룹 격자)에서는 음성 행에 region 이 없어 test 가 전부 양성이 되고
+    그룹 격자에서는 음성 행에 region 이 없어 test 가 전부 양성이 되고
     PR-AUC 가 항상 1.0 이 나왔다. 지역 격자에서는 음성 행에도 region 이 있다.
     """
     regions = sorted(f["region"].unique())
@@ -336,13 +336,13 @@ def grouped_cv_region(f: pd.DataFrame, feats: list, n_folds: int = 3) -> dict:
             "detail": rows}
 
 
-def run_v6r(feat: pd.DataFrame) -> dict:
+def run_regional(feat: pd.DataFrame) -> dict:
     """지역 격자 학습. 모델은 여전히 그룹당 1개(총 2개)."""
     from config import (GROUPS, REGION_GROUP, SPLIT_TRAIN_END,
                         SPLIT_VALID_YEAR, SPLIT_TEST_YEAR)
-    from preprocess.build_features import FULL_FEATURES_V6
+    from preprocess.build_features import FULL_FEATURES
 
-    feats = FULL_FEATURES_V6
+    feats = FULL_FEATURES
     out: dict = {}
 
     for g in GROUPS:
@@ -377,11 +377,11 @@ def run_v6r(feat: pd.DataFrame) -> dict:
                             "pr_auc": round(a, 4), "lift": round(a / b, 2)})
             res[name]["per_region"] = sorted(per, key=lambda x: -x["lift"])
 
-        with open(MID_DIR / f"model_v6r_{g}_full.pkl", "wb") as fh:
+        with open(MID_DIR / f"model_regional_{g}_full.pkl", "wb") as fh:
             pickle.dump({"model": m, "features": feats}, fh)
 
         # ── 동일 시험지 비교: 지역 확률 → noisy-OR → 그룹 확률 ──────────
-        # 원래 14개 매핑 지역만 합쳐야 v6 의 그룹 라벨과 정확히 같아진다.
+        # 원래 14개 매핑 지역만 합쳐야 그룹 격자의 라벨과 정확히 같아진다.
         keep = [r for r, gg in REGION_GROUP.items() if gg == g]
         cmp_rows = {}
         for name, d in [("valid", va), ("test", te)]:
@@ -392,8 +392,8 @@ def run_v6r(feat: pd.DataFrame) -> dict:
                 nor=("proba", lambda s: 1.0 - np.prod(1.0 - s.to_numpy())),
                 pmax=("proba", "max"))
             agg = agg.reset_index()
-            hit_nor, _ = weekly_ranking_hit_v6(agg, "nor")
-            hit_max, _ = weekly_ranking_hit_v6(agg, "pmax")
+            hit_nor, _ = weekly_ranking_hit(agg, "nor")
+            hit_max, _ = weekly_ranking_hit(agg, "pmax")
             cmp_rows[name] = {
                 "n_hours": int(len(agg)), "pos_rate": round(float(agg["y_bin"].mean()), 5),
                 "pr_auc_noisyOR": round(float(average_precision_score(agg["y_bin"], agg["nor"])), 5),
@@ -403,25 +403,25 @@ def run_v6r(feat: pd.DataFrame) -> dict:
             }
         res["group_level_compare"] = cmp_rows
 
-        print(f"\n    [{g}] 지역 확률 → noisy-OR → 그룹 시험지 (v6 와 동일 라벨)")
+        print(f"\n    [{g}] 지역 확률 → noisy-OR → 그룹 시험지 (그룹 격자와 동일 라벨)")
         for name, v in cmp_rows.items():
             print(f"      {name}: PR-AUC {v['pr_auc_noisyOR']:.4f} "
                   f"(max규칙 {v['pr_auc_max']:.4f}) · "
                   f"weekly_hit {v['weekly_hit_noisyOR']:.4f} · 양성률 {v['pos_rate']:.4f}")
 
         print(f"\n    [{g}] grouped CV — 지역을 통째로 빼고 학습")
-        res["grouped_cv"] = grouped_cv_region(f, feats)
+        res["grouped_cv"] = grouped_cv_regional(f, feats)
         out[g] = res
         print()
 
     return out
 
 
-def run_v6(feat: pd.DataFrame) -> dict:
+def run(feat: pd.DataFrame) -> dict:
     from config import GROUPS
-    from preprocess.build_features import FULL_FEATURES_V6
+    from preprocess.build_features import FULL_FEATURES
 
-    feats = FULL_FEATURES_V6
+    feats = FULL_FEATURES
     results = {}
     for g in GROUPS:
         sub = feat[feat["group"] == g].copy()

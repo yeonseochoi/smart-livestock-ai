@@ -18,7 +18,7 @@ import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # archive/ -> demo/
 
 import config
 from config import DEMO_FARM, OUT_DIR, PROV, FINDINGS, finding, section
@@ -33,7 +33,7 @@ def step1_etl():
     section("① S0~S1 — 데이터 정제 → 라벨 테이블 (실데이터)")
     from preprocess import clean_data, build_grid
     c, w = clean_data.run()
-    lab = build_grid.run(c, w)
+    lab = build_grid.run_legacy(c, w)
     RESULTS["s0_s1"] = {"complaints": len(c), "weather": len(w),
                         "label_rows": len(lab),
                         "pos_rate": round(float(lab["y_bin"].mean()), 4)}
@@ -43,7 +43,7 @@ def step1_etl():
 def step2_pipe():
     section("② S4 — 운영 배관 더미 관통 (모델 없이 전 구간 확인)")
     from serving import daily_scoring
-    RESULTS["s4_dummy"] = daily_scoring.run(dummy=True)
+    RESULTS["s4_dummy"] = daily_scoring.run_legacy(dummy=True)
 
 
 def step3_rag():
@@ -60,8 +60,8 @@ def step4_model(lab):
     section("④ S2~S3 — 피처 엔지니어링 → 모델 학습·평가")
     from preprocess import build_features
     from model import train_model
-    feat = build_features.run(lab)
-    res = train_model.run(feat)
+    feat = build_features.run_legacy(lab)
+    res = train_model.run_legacy(feat)
     res.pop("_valid_proba", None)
     RESULTS["s3_model"] = res
     return feat
@@ -101,9 +101,9 @@ def step7_integrate(c=None):
     from advisor import recommend
     from analysis import figures
 
-    RESULTS["s4_real"] = daily_scoring.run(dummy=False)
+    RESULTS["s4_real"] = daily_scoring.run_legacy(dummy=False)
 
-    rec = recommend.recommend("액비살포", storage_days=12, tons=20.0,
+    rec = recommend.recommend_legacy("액비살포", storage_days=12, tons=20.0,
                                  method="표면살포")
     print(f"  [추천] {rec['recommended']['t']} final {rec['recommended']['final']}"
           f" 등급 {rec['recommended']['grade']}"

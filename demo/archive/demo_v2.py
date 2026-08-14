@@ -54,7 +54,7 @@ def check_design_changes():
     from agents import notify_draft
     from datetime import timedelta
     print(f"  PLUME_GRADE_BUMP = {PLUME_GRADE_BUMP} (기본 OFF)")
-    rec = recommend.recommend("액비살포", storage_days=12, tons=20.0)
+    rec = recommend.recommend_legacy("액비살포", storage_days=12, tons=20.0)
     R["s5_v2"] = {"recommended": rec["recommended"], "avoid": rec["avoid"]}
     print(f"  추천 창 등급 {rec['recommended']['grade']} / bumped={rec['recommended']['plume_bumped']}")
     print(f"  플룸 표기: {rec['recommended']['plume_note']}")

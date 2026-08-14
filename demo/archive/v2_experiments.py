@@ -18,8 +18,8 @@ from sklearn.metrics import average_precision_score
 from xgboost import XGBClassifier
 
 from config import MID_DIR, OUT_DIR, SEED
-from preprocess.build_features import FULL_FEATURES
-from model.train_model import weekly_ranking_hit
+from preprocess.build_features import FULL_FEATURES_LEGACY
+from model.train_model import weekly_ranking_hit_legacy
 
 plt.rcParams["font.family"] = "Malgun Gothic"
 plt.rcParams["axes.unicode_minus"] = False
@@ -39,7 +39,7 @@ def _splits(feat):
 
 def _metrics(d: pd.DataFrame, score_col: str) -> dict:
     ap = float(average_precision_score(d["y_bin"], d[score_col]))
-    hit, _ = weekly_ranking_hit(d, score_col)
+    hit, _ = weekly_ranking_hit_legacy(d, score_col)
     return {"pr_auc": round(ap, 4), "weekly_hit": round(hit, 4)}
 
 

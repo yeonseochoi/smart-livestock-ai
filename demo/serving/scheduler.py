@@ -22,8 +22,9 @@ RUN_HOUR = 6
 def job() -> None:
     from serving import daily_scoring
     try:
-        res = daily_scoring.run(dummy=False)
-        print(f"[{datetime.now():%Y-%m-%d %H:%M}] daily_scoring 성공: {res['model']}")
+        res = daily_scoring.run()
+        print(f"[{datetime.now():%Y-%m-%d %H:%M}] daily_scoring 성공: "
+              f"{res['n_upsert']}행 · 실API={res['real_api']}")
     except Exception:
         # 실패 시 risk_calendar 는 갱신되지 않으므로 이전 캘린더가 자동 유지된다
         print(f"[{datetime.now():%Y-%m-%d %H:%M}] daily_scoring 실패 — 이전 캘린더 유지")
