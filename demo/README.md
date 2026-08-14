@@ -18,6 +18,11 @@
 **대상은 익산시 전 축종이다.** 민원 라벨이 "가축 분뇨 냄새(닭, 돼지, 소)" 한 종류라
 축종 구분이 없다. 돼지·한우·가금 모두 서비스 대상이다.
 
+> **이 문서는 코드 사용 설명서다.** 설치 · 실행 · 파일 구조 · 성능을 다룬다.
+> 설계 근거("왜 1시간 격자인가", "왜 플룸을 곱하지 않는가")는
+> [`../docs/PIPELINE.md`](../docs/PIPELINE.md) 에 있다.
+> 프로젝트 전체 개요는 [`../README.md`](../README.md).
+
 ---
 
 ## 빠른 시작
@@ -35,7 +40,7 @@
 │   ├── 05_지오코딩_결과/farm_coords_vworld.csv        ← 익산 농가 좌표
 │   ├── 전북특별자치도 김제시_축산현황_20250515_geocoded.csv
 │   └── 전북특별자치도 익산시_축산농가 현황_*.csv
-└── 작업폴더/최종구현 py파일/   ← (선택) legacy 원본. demo.py 가 해시 검증에 사용
+└── 작업폴더/최종구현 py파일/   ← (선택) legacy 원본. run_check.py 가 해시 검증에 사용
 ```
 
 ```powershell
@@ -52,7 +57,7 @@ python run_check.py     # 검증    — 회귀 점검 39항목
 
 **v5 트랙(과거 버전)** 도 그대로 보존되어 있다.
 ```powershell
-python demo.py                      # v5 전체 실행 + legacy 무결성 해시 검증
+python archive/demo.py              # v5 전체 실행 (과거 버전 재현)
 python archive/demo_v2.py ~ demo_v5.py   # 과거 검증 라운드 재현
 python run_train_region.py          # 지역 격자 병행 트랙 (실험)
 ```
@@ -68,8 +73,8 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
 | --- | --- | --- | --- |
 | **A** | 데이터·모델 | `preprocess/`(clean_data → build_grid → build_features/spatial_features) → `model/train_model.py` | `python run_train.py`. 모델 실험은 `model/train_model.py` 하이퍼파라미터 + `preprocess/build_features.py` 피처 리스트 수정 |
 | **B** | 운영 배관 | `serving/` — db.py(SQLite), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
-| **C** | RAG | `rag/` — ingest.py(조문 청킹+위계 메타), search.py(ko-sroberta+위계 부스트), eval_qa_v2.py(30문항) | 평가 재실행: `python demo_v3.py` 의 v3-12 구간. 시행령 별표 원문(DOC) 도착 시 `python -m rag.reingest_annex <파일.docx>` |
-| **D** | 에이전트 | `agents/` — work_guide.py(작업 가이드), notify_draft.py(주민 알림), tools_schema.py(도구 6종 스키마) | demo.py ⑥ 구간. ANTHROPIC_API_KEY 설정 시 Claude tool use 로 전환되는 구조 |
+| **C** | RAG | `rag/` — ingest.py(조문 청킹+위계 메타), search.py(ko-sroberta+위계 부스트), eval_qa_v2.py(30문항) | 평가 재실행: `python archive/demo_v3.py` 의 v3-12 구간. 시행령 별표 원문(DOC) 도착 시 `python -m rag.reingest_annex <파일.docx>` |
+| **D** | 에이전트 | `agents/` — work_guide.py(작업 가이드), notify_draft.py(주민 알림), tools_schema.py(도구 6종 스키마) | `archive/demo.py` ⑥ 구간. ANTHROPIC_API_KEY 설정 시 Claude tool use 로 전환되는 구조 |
 
 공용 분석: `analysis/` (figures 그래프 6종, v2~v5 실험, plume_validation 다중 발원 하네스).
 발표 그래프는 `out/figs/` (captions.md 에 한 줄 캡션).
@@ -241,7 +246,6 @@ demo/
   run_train_region.py   지역격자 병행 트랙  ← 진입점
   run_serve.py          서빙 + 추천        ← 진입점
   run_check.py          회귀 점검 39항목    ← 진입점
-  demo.py               v5 전체 실행 + legacy 해시 검증
   config.py             경로 · 그룹 정의 · 기상 지점 · 분할 연도
 
   preprocess/           ── 데이터 준비
@@ -271,7 +275,7 @@ demo/
   archive/   과거 검증 라운드 v2~v5 (현역 파이프라인 밖 — archive/README.md 참조)
     demo_v2~v5.py · v2_experiments · v3_aws · v4_diag14 · v4_metrics · v5_farms
 
-  legacy/    ★ 수정 금지 — demo.py 가 원본과 SHA-256 대조
+  legacy/    ★ 수정 금지 — run_check.py 가 원본과 SHA-256 대조
     plume.py · emission.py · diffusion.py · geo.py · kma.py · constants.py
     residence.py · console.py · main.py · recommend.py · mock_*.py
 
@@ -308,56 +312,17 @@ demo/
 | --- | --- | --- | --- | --- | --- | --- |
 | 시가지원거리 | valid 2024 | 0.884 | 0.195 | 10.5배 | 81.1% | 평균의 1/16.4 |
 | **시가지원거리** | **test 2025** | **0.899** | **0.221** | **7.7배** | **85.3%** | **평균의 1/16.7** |
-| 농촌근거리 | valid 2024 | 0.785 | 0.141 | 3.4배 | 67.0% | 평균의 1/12.1 |
-| 농촌근거리 | test 2025 | 0.724 | 0.074 | 2.5배 | 50.0% | 평균의 1/4.7 |
+| 농촌근거리 | valid 2024 | 0.785 | 0.141 | 3.4배 | 62.0% | 평균의 1/12.0 |
+| 농촌근거리 | test 2025 | 0.724 | 0.074 | 2.5배 | 48.8% | 평균의 1/7.3 |
 
-중기예보용 reduced 모델(7피처, 바람 없음): 시가지 test ROC 0.868 / 농촌 0.748.
+중기예보용 reduced 모델(7피처, 바람 없음): 시가지 test PR-AUC 0.185(lift 6.4배) / 농촌 0.082(2.8배).
+
+**이 표의 값은 `run_train.py` 가 `out/training_results.json` 에 기록한다.**
+문서와 파일이 다르면 파일이 옳다. 손으로 옮겨 적다 틀린 전례가 있어 지표를 코드로 옮겼다.
 
 **농촌근거리가 낮은 이유는 파악돼 있다** — 왕궁면 흥암리 민원이 2020~2023 총 1건에서
 2024년 517건으로 급증해 학습 구간과 평가 구간의 지역 구성이 다르다.
 원인(앱 보급 / 지역명 표기 변경 / 실제 사건) 확인이 필요하다.
-
----
-
-## 핵심 발견
-
-**민원의 26.2%는 익산 발원이 아니다.** 김제 공공데이터는 번지가 `***` 로 마스킹돼
-상호명 매칭으로 12.2%만 좌표를 얻었는데, 리(里) 단위는 살아 있어 같은 리의 실좌표
-중앙값으로 채웠다. **좌표 확보율 12.2% → 95.9%.** 풍상측 15km 검증 결과 민원의 26.2%가
-"익산 농가 0곳, 김제 농가만 있음"이었다.
-
-**익산은 하나가 아니다.** 왕궁면 흥암리와 시가지의 시간별 민원 상관이 **0.014** 로
-사실상 무관하다. 도달 시간도 5~17분 vs 50~90분으로 지배 물리가 다르다.
-
-**3시간 블록은 너무 길다.** 냄새 도달 시간 중앙값 32분, 3시간 창 안 풍향 변화율 58.6%.
-1시간 격자로 좁혀 "1시간 전 바람" 피처를 만들 수 있게 됐다.
-
----
-
-## 알려진 한계
-
-```
-   ① 살포 기록이 세상에 없다     y=0 이 "안전"인지 "아무도 안 뿌림"인지 구분 불가
-                                상관을 학습해 인과를 주장하는 구조적 간극
-   ② 민원 저감이지 악취 저감 아님  야간 81.5%가 역전층인지 신고 가능 시간인지 불명
-   ③ 김제 발원 26.2% 는 못 줄임   익산 농가 대상 서비스의 효과 상한
-   ④ 학습=관측 / 서빙=예보        열화량 미측정
-   ⑤ 확률 미보정                 순위는 유효, 절대값은 신뢰 불가
-   ⑥ WORK_WEIGHT 는 [C] 임의값
-   ⑦ 그룹 구분 기준이 돼지 거리만  발원 피처는 3축종인데 유형 구분은 돼지만 사용
-```
-
----
-
-## 남은 작업
-
-- [ ] `rules/spread_rules.py` 법령 하드필터
-- [ ] RAG 인덱스 ① 살포 판정 (원료 PDF는 `03_RAG_법령매뉴얼/0814 추가문서/` 에 확보됨)
-- [ ] RAG 인덱스 ② 저감 팁
-- [ ] `advisor/s6_cases.py` 유사사례 검색
-- [ ] `serving/farm_input.py` 피트 수위 추정 (두당 발생 원단위 확인 필요)
-- [ ] 중기예보 활용신청 — `data.go.kr` → `MidFcstInfoService`
-- [ ] **API 키 재발급** (최우선)
 
 ---
 
