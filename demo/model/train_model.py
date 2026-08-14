@@ -12,7 +12,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
@@ -224,14 +224,38 @@ def _run_one_group(f: pd.DataFrame, gname: str, feats: list) -> dict:
         p = m.predict_proba(d[feats])[:, 1]
         d = d.assign(proba=p)
         hit, _ = weekly_ranking_hit(d, "proba")
+        y = d["y_bin"].to_numpy()
+        base = float(y.mean())
+        ap = float(average_precision_score(y, p))
+
+        # ── 발표에 쓰는 지표 4종 — 반드시 여기서 기록한다 ─────────────
+        # README·docs 가 인용하는 값은 저장소 안에서 재현되어야 한다.
+        # 예전에는 임시 스크립트로 재서 손으로 옮겨 적었고, 그 과정에서
+        # 농촌근거리 재현율·A등급 배수가 실제와 어긋난 채 문서에 실렸다.
+        k = max(1, int(len(p) * 0.20))
+        order = np.argsort(-p)
+        top20 = order[:k]                      # 위험 상위 20% — 피해야 할 시각
+        bot20 = order[::-1][:k]                # 위험 하위 20% — A등급 후보
+        recall20 = float(y[top20].sum() / y.sum()) if y.sum() else float("nan")
+        a_rate = float(y[bot20].mean())
+
         res[split_name] = {
-            "pr_auc": round(float(average_precision_score(d["y_bin"], p)), 4),
+            "roc_auc": round(float(roc_auc_score(y, p)), 4),
+            "pr_auc": round(ap, 4),
+            "lift": round(ap / base, 2) if base else None,   # PR-AUC / 양성률
+            "recall_top20": round(recall20, 3),
+            "a_grade_ratio": round(base / a_rate, 1) if a_rate else None,
             "weekly_hit": round(hit, 4),
-            "pos_rate": round(float(d["y_bin"].mean()), 4),
+            "pos_rate": round(base, 4),
             "proba_mean": round(float(p.mean()), 4),
             "proba_median": round(float(np.median(p)), 4),
             "proba_p05": round(float(np.quantile(p, 0.05)), 4),
         }
+        print(f"          {split_name}: ROC {res[split_name]['roc_auc']}"
+              f" · PR {res[split_name]['pr_auc']}"
+              f" (lift {res[split_name]['lift']}배)"
+              f" · 상위20% 재현율 {recall20:.1%}"
+              f" · A등급 민원율 = 평균의 1/{res[split_name]['a_grade_ratio']}")
         if split_name == "valid":
             vp = p
 
