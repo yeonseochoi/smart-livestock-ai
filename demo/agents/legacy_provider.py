@@ -2,9 +2,16 @@
 
 이 모듈은 기존 팀 코드를 복제하지 않고 호출한다. mock을 쓰는 메서드는 source를
 fixture로 표시하며, 연결 실패를 다른 데이터로 조용히 대체하지 않는다.
+
+2026-08-16 수정 — get_risk_calendar() 가 옛 risk_calendar(3시간 블록, 그룹
+미분리) 테이블을 보고 있었는데, B가 이미 risk_hourly(1시간, 농촌근거리/
+시가지원거리 그룹 분리)로 파이프라인을 이전한 상태라 최신 모델 결과와
+연결되지 않는 문제가 있었다. risk_hourly를 직접 읽도록 고쳤다
+(그룹 간 보수적 max 조합 후 1h→3h 집계 — D 계약의 resolution='3h' 형식은 유지).
 """
 from __future__ import annotations
 
+import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +29,7 @@ from residence import find_receptors
 
 
 KST = timezone(timedelta(hours=9))
+_GRADE_ORDER = {"낮음": 0, "주의": 1, "위험": 2}
 
 
 class LegacyProvider:
@@ -81,55 +89,83 @@ class LegacyProvider:
         con = db.connect()
         try:
             rows = con.execute(
-                "SELECT date, block, risk_prob, risk_grade, model_type, updated_at "
-                "FROM risk_calendar ORDER BY date, block"
+                "SELECT date, hour, grp, risk_prob, risk_grade, model_type, updated_at "
+                "FROM risk_hourly ORDER BY date, hour"
             ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
         finally:
             con.close()
         if not rows:
             return self._response(
                 "unavailable", None,
-                self._source("unavailable", "B risk_calendar"),
-                "risk_calendar가 비어 있습니다. 먼저 B의 run_daily를 실행하세요.",
+                self._source("unavailable", "B risk_hourly"),
+                "risk_hourly가 비어 있습니다. 먼저 B의 serving.daily_scoring.run()을 "
+                "실행하세요 (옛 risk_calendar는 현행 파이프라인이 더는 채우지 않습니다).",
             )
 
-        by_date: dict[str, list[tuple]] = defaultdict(list)
+        # 그룹(농촌근거리/시가지원거리)별 시각 → 그룹 간 보수적 max 조합
+        # (advisor.recommend.combine("max")와 동일 원칙 — 절대규칙 1: 곱하지 않는다)
+        by_hour: dict[tuple[str, int], tuple] = {}
         for row in rows:
-            by_date[row[0]].append(row)
-        dates = sorted(by_date)[: max(1, min(int(days), 7))]
+            date_value, hour, _grp, prob, grade, model_type, updated_at = row
+            key = (date_value, int(hour))
+            current = by_hour.get(key)
+            if current is None or float(prob) > float(current[2]):
+                by_hour[key] = (date_value, hour, prob, grade, model_type, updated_at)
+
+        # 1시간 값을 3시간 블록으로 집계 (D 계약의 resolution='3h'/block 0~7 유지 —
+        # work_guide._build_windows() 가 이 형태를 그대로 소비한다)
+        by_block: dict[tuple[str, int], list[tuple]] = defaultdict(list)
+        for (date_value, hour), row in by_hour.items():
+            by_block[(date_value, hour // 3)].append(row)
+
+        dates = sorted({date_value for date_value, _ in by_block})[
+            : max(1, min(int(days), 7))
+        ]
         items: list[dict[str, Any]] = []
         for index, date_text in enumerate(dates, 1):
-            daily = by_date[date_text]
+            blocks_today = sorted(
+                block for date_value, block in by_block if date_value == date_text
+            )
             if index <= 3:
-                for date_value, block, prob, grade, model_type, updated_at in daily:
-                    start = datetime.strptime(date_value, "%Y-%m-%d").replace(
-                        hour=int(block) * 3, tzinfo=KST
+                for block in blocks_today:
+                    block_rows = by_block[(date_text, block)]
+                    prob = sum(float(r[2]) for r in block_rows) / len(block_rows)
+                    grade = max(
+                        (r[3] for r in block_rows),
+                        key=lambda g: _GRADE_ORDER.get(g, 0),
+                    )
+                    start = datetime.strptime(date_text, "%Y-%m-%d").replace(
+                        hour=block * 3, tzinfo=KST
                     )
                     items.append({
-                        "date": date_value, "block": block, "start": start.isoformat(),
-                        "resolution": "3h", "risk_score": float(prob),
+                        "date": date_text, "block": block, "start": start.isoformat(),
+                        "resolution": "3h", "risk_score": round(prob, 4),
                         "risk_grade": grade, "horizon": "D+1~3",
-                        "model_type": model_type, "model_version": None,
-                        "forecast_issued_at": updated_at, "valid_at": start.isoformat(),
+                        "model_type": block_rows[0][4], "model_version": None,
+                        "forecast_issued_at": block_rows[0][5],
+                        "valid_at": start.isoformat(),
                     })
             else:
-                prob = sum(float(row[2]) for row in daily) / len(daily)
+                day_rows = [r for block in blocks_today
+                           for r in by_block[(date_text, block)]]
+                prob = sum(float(r[2]) for r in day_rows) / len(day_rows)
                 worst_grade = max(
-                    (row[3] for row in daily),
-                    key=lambda grade: {"낮음": 0, "주의": 1, "위험": 2}.get(grade, 0),
+                    (r[3] for r in day_rows), key=lambda g: _GRADE_ORDER.get(g, 0),
                 )
                 items.append({
                     "date": date_text, "block": None, "start": None,
                     "resolution": "day", "risk_score": round(prob, 4),
                     "risk_grade": worst_grade, "horizon": "D+4~7",
-                    "model_type": daily[0][4], "model_version": None,
-                    "forecast_issued_at": daily[0][5], "valid_at": date_text,
+                    "model_type": day_rows[0][4], "model_version": None,
+                    "forecast_issued_at": day_rows[0][5], "valid_at": date_text,
                 })
         return self._response(
             "ok", {"farm_id": farm_id, "work_type": work_type, "items": items},
-            self._source("connected", "B SQLite risk_calendar",
-                         "현 DB에는 farm_id·model_version·issued_at 열이 없음",
-                         "D+4~7의 기존 블록 복제값은 화면에서 일 단위로만 집계"),
+            self._source("connected", "B SQLite risk_hourly (그룹 간 max 조합, 1h→3h 집계)",
+                         "그룹(농촌근거리/시가지원거리) 중 보수적으로 위험도가 더 높은 쪽 채택",
+                         "D+4~7은 risk_hourly 값을 일 단위로 평균 집계"),
         )
 
     def get_forecast(self, farm_id: str, days: int) -> dict[str, Any]:
