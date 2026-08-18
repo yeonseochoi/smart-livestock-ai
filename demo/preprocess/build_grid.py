@@ -74,10 +74,16 @@ def run(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     #               3시간 창 안에서 풍향이 크게 바뀌는 비율 58.6%.
     #               그리고 3시간 블록에서는 'ws_lag1'을 만들 윗줄이 없다.
     # 격자 범위는 기상 커버리지에서 유도한다 (지점 교체 시 자동 대응).
+    # [2026-08-18 수정] 기존에는 하한이 pd.Timestamp("2020-01-01") 로 하드코딩돼 있었다.
+    #   민원 데이터가 2020-01 부터였을 때는 맞는 값이었지만, 재크롤링으로 2019-05-28
+    #   부터 확보한 뒤에도 2019년이 통째로 잘려나갔다(라벨은 있는데 격자가 없어서 무시됨).
+    #   상수를 지우고 민원·기상이 모두 존재하는 가장 이른 시각에서 시작하도록 바꾼다.
     w_min = weather["dt"].min().floor("h")
     w_max = weather["dt"].max().floor("h")
-    hours = pd.date_range(max(w_min, pd.Timestamp("2020-01-01")), w_max, freq="h")
-    print(f"  격자 기간 {hours[0]:%Y-%m-%d} ~ {hours[-1]:%Y-%m-%d} ({len(hours):,}시각)")
+    c_min = complaints["dt"].min().floor("h")
+    hours = pd.date_range(max(w_min, c_min), w_max, freq="h")
+    print(f"  격자 기간 {hours[0]:%Y-%m-%d} ~ {hours[-1]:%Y-%m-%d} ({len(hours):,}시각)"
+          f"  [기상 {w_min:%Y-%m-%d} · 민원 {c_min:%Y-%m-%d} 중 늦은 쪽부터]")
     grid = pd.MultiIndex.from_product(
         [hours, GROUPS], names=["dt_h", "group"]
     ).to_frame(index=False)
@@ -153,9 +159,11 @@ def run(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
 def run_regional(complaints: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     from config import REGIONS, REGION_GROUP_R, REGION_CENTER
 
+    # [2026-08-18 수정] run() 과 동일 — 2020-01-01 하드코딩 하한 제거
     w_min = weather["dt"].min().floor("h")
     w_max = weather["dt"].max().floor("h")
-    hours = pd.date_range(max(w_min, pd.Timestamp("2020-01-01")), w_max, freq="h")
+    c_min = complaints["dt"].min().floor("h")
+    hours = pd.date_range(max(w_min, c_min), w_max, freq="h")
     grid = pd.MultiIndex.from_product(
         [hours, REGIONS], names=["dt_h", "region"]
     ).to_frame(index=False)
