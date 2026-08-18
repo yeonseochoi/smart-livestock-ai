@@ -20,6 +20,40 @@ OUT_DIR = DEMO_DIR / "out"
 MID_DIR = DEMO_DIR / "data"          # 중간 산출물 (parquet)
 DB_PATH = OUT_DIR / "demo.db"
 
+# ── 서빙 DB 백엔드 ────────────────────────────────────────────────
+# [2026-08-18] SQLite -> PostgreSQL(Supabase) 이관.
+#   이유는 시각화가 아니라 무인 운영이다. GitHub Actions 는 잡이 끝나면
+#   컨테이너가 사라져 demo.db 가 증발한다. 매일 자동 적재를 하려면 DB 가
+#   저장소 밖에 있어야 한다.
+#   단, 인터넷·계정 없이도 로컬 개발과 run_check 가 돌아가야 하므로
+#   SQLite 경로를 지우지 않고 폴백으로 남겼다.
+#     DATABASE_URL 있음 -> PostgreSQL   /   없음 -> 기존 out/demo.db
+#   접속 문자열은 .env 에만 두고 절대 커밋하지 않는다 (.gitignore 참조).
+def _load_dotenv(*paths) -> None:
+    """python-dotenv 없이도 동작하는 최소 .env 로더.
+
+    이미 있는 환경변수는 덮어쓰지 않는다 (CI 의 Secrets 가 우선).
+    """
+    for path in paths:
+        try:
+            if not path.exists():
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip("'").strip('"')
+                if k and k not in os.environ:
+                    os.environ[k] = v
+        except Exception:
+            continue        # .env 가 깨져도 import 자체는 살아 있어야 한다
+
+
+_load_dotenv(DEMO_DIR / ".env", PROJECT_DIR / ".env")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DB_BACKEND = "postgres" if DATABASE_URL else "sqlite"
+
 # legacy 모듈은 평면 import(from geo import ...) 구조라 sys.path 에 등록한다.
 # 파일은 절대 수정하지 않는다 (절대 규칙 3).
 if str(LEGACY_DIR) not in sys.path:

@@ -266,7 +266,7 @@ TMP·REH·WSD·VEC·PTY 다. 이게 절대규칙이다 — 예보에 없는 변�
    관측 꼬리 48시각  +  단기예보 81시각  =  162행
    중기예보 192행 (D+4~7, 일 단위 → reduced 모델 7피처)
    ────────────────────────────────────
-   누적 354행 → SQLite
+   누적 354행 → DB (PostgreSQL / SQLite)
 ```
 
 **학습과 같은 함수를 쓴다.** `spatial_features.run_serving()` 은 학습용 `run()` 과
@@ -276,7 +276,7 @@ TMP·REH·WSD·VEC·PTY 다. 이게 절대규칙이다 — 예보에 없는 변�
 > 서빙은 설정 파일의 기본값을 썼다. 시가지 중심이 약 0.9km 어긋난 채로 돌고 있었고,
 > 아무 에러도 안 났다. 지금은 `data/group_center.json` 으로 파일에 떨궈 양쪽이 같은 값을 읽는다.
 
-**저장** — SQLite `risk_hourly`, PK 는 `(date, hour, grp)` 다.
+**저장** — `risk_hourly`, PK 는 `(date, hour, grp)` 다.
 `grp` 가 빠지면 두 유형 중 하나가 다른 하나를 덮어쓴다.
 
 ### 단계 8 — 추천 · `advisor/recommend.py`
