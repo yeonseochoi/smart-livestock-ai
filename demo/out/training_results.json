@@ -1,0 +1,246 @@
+{
+  "s0": {
+    "complaints": 15448,
+    "weather": 66882
+  },
+  "geocode_gimje": {
+    "rows": 1511,
+    "with_coord": 1449,
+    "src": {
+      "리중앙값[B]": 975,
+      "읍면중앙값[C]": 290,
+      "실좌표[A]": 184,
+      "없음": 62
+    }
+  },
+  "grid": {
+    "rows": 126448,
+    "pos_rate": 0.0262,
+    "by_group": {
+      "농촌근거리": {
+        "rows": 63224,
+        "pos": 988
+      },
+      "시가지원거리": {
+        "rows": 63224,
+        "pos": 2331
+      }
+    }
+  },
+  "features": {
+    "rows": 126448,
+    "n_features": 28,
+    "features": [
+      "temp",
+      "humid",
+      "ws",
+      "wd_sin",
+      "wd_cos",
+      "rain",
+      "night",
+      "night_ws",
+      "night_humid",
+      "hour",
+      "month_sin",
+      "month_cos",
+      "dow",
+      "ws_lag1",
+      "wd_sin_lag1",
+      "wd_cos_lag1",
+      "ws_lag2",
+      "calm_streak",
+      "up_ik_pig",
+      "up_ik_cattle",
+      "up_ik_poultry",
+      "up_gj_pig",
+      "up_gj_cattle",
+      "up_gj_poultry",
+      "up_nearest_km",
+      "prior_rate_1y",
+      "prior_std_1y",
+      "prior_month"
+    ]
+  },
+  "train": {
+    "농촌근거리": {
+      "split": {
+        "train": 40194,
+        "valid": 8784,
+        "test": 8733
+      },
+      "scale_pos_weight": 147.9,
+      "valid": {
+        "roc_auc": 0.7968,
+        "pr_auc": 0.1508,
+        "lift": 3.67,
+        "recall_top20": 0.587,
+        "a_grade_ratio": 6.6,
+        "weekly_hit": 0.4518,
+        "pos_rate": 0.0411,
+        "proba_mean": 0.7279,
+        "proba_median": 0.7478,
+        "proba_p05": 0.6174
+      },
+      "test": {
+        "roc_auc": 0.7442,
+        "pr_auc": 0.077,
+        "lift": 2.63,
+        "recall_top20": 0.488,
+        "a_grade_ratio": 6.4,
+        "weekly_hit": 0.4771,
+        "pos_rate": 0.0293,
+        "proba_mean": 0.7255,
+        "proba_median": 0.7353,
+        "proba_p05": 0.6174
+      },
+      "grade_cuts": {
+        "risk": 0.7928,
+        "watch": 0.7478,
+        "n_monthly": 12
+      },
+      "monthly_watch": {
+        "1": 0.668,
+        "2": 0.668,
+        "3": 0.668,
+        "4": 0.697,
+        "5": 0.695,
+        "6": 0.793,
+        "7": 0.789,
+        "8": 0.793,
+        "9": 0.793,
+        "10": 0.793,
+        "11": 0.709,
+        "12": 0.664
+      },
+      "reduced": {
+        "features": [
+          "temp",
+          "rain",
+          "hour",
+          "night",
+          "month_sin",
+          "month_cos",
+          "dow"
+        ],
+        "test_pr_auc": 0.0827,
+        "test_lift": 2.82
+      }
+    },
+    "시가지원거리": {
+      "split": {
+        "train": 40194,
+        "valid": 8784,
+        "test": 8733
+      },
+      "scale_pos_weight": 21.2,
+      "valid": {
+        "roc_auc": 0.8845,
+        "pr_auc": 0.1872,
+        "lift": 10.03,
+        "recall_top20": 0.805,
+        "a_grade_ratio": 16.4,
+        "weekly_hit": 0.5416,
+        "pos_rate": 0.0187,
+        "proba_mean": 0.3507,
+        "proba_median": 0.2268,
+        "proba_p05": 0.0549
+      },
+      "test": {
+        "roc_auc": 0.8977,
+        "pr_auc": 0.2161,
+        "lift": 7.52,
+        "recall_top20": 0.833,
+        "a_grade_ratio": 25.1,
+        "weekly_hit": 0.6239,
+        "pos_rate": 0.0287,
+        "proba_mean": 0.3411,
+        "proba_median": 0.2131,
+        "proba_p05": 0.0554
+      },
+      "grade_cuts": {
+        "risk": 0.6692,
+        "watch": 0.2268,
+        "n_monthly": 12
+      },
+      "monthly_watch": {
+        "1": 0.097,
+        "2": 0.113,
+        "3": 0.115,
+        "4": 0.213,
+        "5": 0.235,
+        "6": 0.457,
+        "7": 0.746,
+        "8": 0.677,
+        "9": 0.663,
+        "10": 0.494,
+        "11": 0.17,
+        "12": 0.112
+      },
+      "reduced": {
+        "features": [
+          "temp",
+          "rain",
+          "hour",
+          "night",
+          "month_sin",
+          "month_cos",
+          "dow"
+        ],
+        "test_pr_auc": 0.1755,
+        "test_lift": 6.11
+      }
+    },
+    "grouped_cv": {
+      "folds": 4,
+      "pr_auc_mean": 1.0,
+      "pr_auc_std": 0.0,
+      "detail": [
+        {
+          "held": [
+            "낭산면 용기리",
+            "부송동",
+            "오산면 신지리",
+            "팔봉동"
+          ],
+          "n_test": 912,
+          "test_pos_rate": 1.0,
+          "pr_auc": 1.0
+        },
+        {
+          "held": [
+            "동산동",
+            "송학동",
+            "왕궁면 흥암리",
+            "평화동"
+          ],
+          "n_test": 1057,
+          "test_pos_rate": 1.0,
+          "pr_auc": 1.0
+        },
+        {
+          "held": [
+            "마동",
+            "어양동",
+            "춘포면 신동리"
+          ],
+          "n_test": 647,
+          "test_pos_rate": 1.0,
+          "pr_auc": 1.0
+        },
+        {
+          "held": [
+            "모현동1가",
+            "영등동",
+            "춘포면 쌍정리"
+          ],
+          "n_test": 703,
+          "test_pos_rate": 1.0,
+          "pr_auc": 1.0
+        }
+      ]
+    }
+  },
+  "findings": [
+    "그룹 미지정 비율 15.5% 가 기대(11%)보다 큼 — config.REGION_GROUP 의 지역명이 데이터와 어긋났을 가능성"
+  ]
+}

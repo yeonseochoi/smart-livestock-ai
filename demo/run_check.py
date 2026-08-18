@@ -55,9 +55,13 @@ for gname, d in f.groupby("group"):
     a = d[d.y_bin == 1]["prior_rate_1y"].mean()
     b = d[d.y_bin == 0]["prior_rate_1y"].mean()
     chk(f"prior 누수 없음 ({gname})", abs(a - b) < 0.05, f"양성 {a:.4f} vs 음성 {b:.4f}")
-first30 = f[f.dt_h < "2020-01-31"]["prior_missing"].mean()
+# [2026-08-18 수정] 기준일이 "2020-01-31" 로 하드코딩돼 있었다. 격자 시작이
+#   민원 커버리지(2019-05-28)로 앞당겨지자 검사 창이 8개월로 늘어나, 설계는
+#   정상인데 비율이 희석돼 실패로 잡혔다. 격자 실제 시작일에서 30일로 바꾼다.
+_g0 = f["dt_h"].min()
+first30 = f[f.dt_h < _g0 + pd.Timedelta(days=30)]["prior_missing"].mean()
 chk("초기 30일 prior 결측 플래그 (min_periods=720h 설계대로)",
-    first30 > 0.9, f"2020년 1월 결측비율 {first30:.1%}")
+    first30 > 0.9, f"{_g0:%Y-%m-%d} 부터 30일 결측비율 {first30:.1%}")
 
 print("\n" + "=" * 78); print(" 3. 학습 피처 == 서빙 피처"); print("=" * 78)
 for g in GROUPS:
