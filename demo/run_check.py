@@ -1,9 +1,9 @@
 """RAG 이전 전 구간 정밀 점검 — 학습 · 서빙 · 추천."""
-import json, pickle, sqlite3, sys
+import json, pickle, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np, pandas as pd
-from config import (MID_DIR, DB_PATH, GROUPS, REGION_GROUP, SPLIT_TRAIN_END,
+from config import (MID_DIR, GROUPS, REGION_GROUP, SPLIT_TRAIN_END,
                     SPLIT_VALID_YEAR, SPLIT_TEST_YEAR, WEATHER_SOURCE)
 from console import use_utf8_stdout
 
@@ -55,9 +55,13 @@ for gname, d in f.groupby("group"):
     a = d[d.y_bin == 1]["prior_rate_1y"].mean()
     b = d[d.y_bin == 0]["prior_rate_1y"].mean()
     chk(f"prior 누수 없음 ({gname})", abs(a - b) < 0.05, f"양성 {a:.4f} vs 음성 {b:.4f}")
-first30 = f[f.dt_h < "2020-01-31"]["prior_missing"].mean()
+# [2026-08-18 수정] 기준일이 "2020-01-31" 로 하드코딩돼 있었다. 격자 시작이
+#   민원 커버리지(2019-05-28)로 앞당겨지자 검사 창이 8개월로 늘어나, 설계는
+#   정상인데 비율이 희석돼 실패로 잡혔다. 격자 실제 시작일에서 30일로 바꾼다.
+_g0 = f["dt_h"].min()
+first30 = f[f.dt_h < _g0 + pd.Timedelta(days=30)]["prior_missing"].mean()
 chk("초기 30일 prior 결측 플래그 (min_periods=720h 설계대로)",
-    first30 > 0.9, f"2020년 1월 결측비율 {first30:.1%}")
+    first30 > 0.9, f"{_g0:%Y-%m-%d} 부터 30일 결측비율 {first30:.1%}")
 
 print("\n" + "=" * 78); print(" 3. 학습 피처 == 서빙 피처"); print("=" * 78)
 for g in GROUPS:
@@ -81,11 +85,16 @@ for g in GROUPS:
     chk(f"{g} 각 분할에 양성 존재", min(n) > 0, f"train {n[0]} / valid {n[1]} / test {n[2]}")
 
 print("\n" + "=" * 78); print(" 5. 서빙 DB"); print("=" * 78)
-con = sqlite3.connect(DB_PATH)
-sch = con.execute("SELECT sql FROM sqlite_master WHERE name='risk_hourly'").fetchone()
+# [2026-08-18] SQLite 전용 검사였다. sqlite_master 조회와 pd.read_sql 을
+#   백엔드 중립 헬퍼로 바꿨다 — PostgreSQL 은 pg_index 를 본다.
+#   항목 수(39)는 그대로다.
+from serving import db
+print(f"  백엔드: {db.describe()}")
+con = db.connect()
+pk = db.primary_key_columns(con, "risk_hourly")
 chk("risk_hourly 스키마 PK(date,hour,grp)",
-    sch and "PRIMARY KEY(date, hour, grp)" in sch[0])
-d = pd.read_sql("SELECT * FROM risk_hourly", con)
+    pk == ["date", "hour", "grp"], "PK " + (", ".join(pk) or "없음"))
+d = db.fetch_frame(con, "SELECT * FROM risk_hourly")
 chk("서빙 결과 적재됨", len(d) > 0, f"{len(d)}행")
 chk("두 그룹 모두 적재", set(d["grp"]) == set(GROUPS))
 chk("시각당 그룹 2행 (덮어쓰기 없음)",

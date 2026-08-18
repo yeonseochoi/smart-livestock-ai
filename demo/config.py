@@ -20,14 +20,60 @@ OUT_DIR = DEMO_DIR / "out"
 MID_DIR = DEMO_DIR / "data"          # 중간 산출물 (parquet)
 DB_PATH = OUT_DIR / "demo.db"
 
+# ── 서빙 DB 백엔드 ────────────────────────────────────────────────
+# [2026-08-18] SQLite -> PostgreSQL(Supabase) 이관.
+#   이유는 시각화가 아니라 무인 운영이다. GitHub Actions 는 잡이 끝나면
+#   컨테이너가 사라져 demo.db 가 증발한다. 매일 자동 적재를 하려면 DB 가
+#   저장소 밖에 있어야 한다.
+#   단, 인터넷·계정 없이도 로컬 개발과 run_check 가 돌아가야 하므로
+#   SQLite 경로를 지우지 않고 폴백으로 남겼다.
+#     DATABASE_URL 있음 -> PostgreSQL   /   없음 -> 기존 out/demo.db
+#   접속 문자열은 .env 에만 두고 절대 커밋하지 않는다 (.gitignore 참조).
+def _load_dotenv(*paths) -> None:
+    """python-dotenv 없이도 동작하는 최소 .env 로더.
+
+    이미 있는 환경변수는 덮어쓰지 않는다 (CI 의 Secrets 가 우선).
+    """
+    for path in paths:
+        try:
+            if not path.exists():
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip("'").strip('"')
+                if k and k not in os.environ:
+                    os.environ[k] = v
+        except Exception:
+            continue        # .env 가 깨져도 import 자체는 살아 있어야 한다
+
+
+_load_dotenv(DEMO_DIR / ".env", PROJECT_DIR / ".env")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DB_BACKEND = "postgres" if DATABASE_URL else "sqlite"
+
 # legacy 모듈은 평면 import(from geo import ...) 구조라 sys.path 에 등록한다.
 # 파일은 절대 수정하지 않는다 (절대 규칙 3).
 if str(LEGACY_DIR) not in sys.path:
     sys.path.insert(0, str(LEGACY_DIR))
 
 # ── 실데이터 경로 (프로젝트 데이터 통합 폴더, README.md 기준) ─────────
-COMPLAINTS_XLSX = DATA_ROOT / "01_민원데이터" / "익산시 악취 민원 데이터.xlsx"
-WEATHER_CSV = DATA_ROOT / "02_기상데이터" / "weather_hourly_2020_202607.csv"   # 전주 ASOS 146
+# [2026-08-18] 민원 재크롤링본으로 교체 — 2019-05-28 부터 2026-08-17 까지 확장.
+#   구본 익산시 악취 민원 데이터.xlsx : 13,039행 / 2020-01-01 ~ 2026-07-30
+#   신본 _20190528-20260818.xlsx      : 16,113행 / 2019-05-28 ~ 2026-08-17  (+3,074행)
+#   가축분뇨(101) 익산 기준 5,654 -> 7,547건 (+1,893, +33.5%)
+COMPLAINTS_XLSX = DATA_ROOT / "01_민원데이터" / "익산시 악취 민원 데이터_20190528-20260818.xlsx"
+COMPLAINTS_XLSX_LEGACY = DATA_ROOT / "01_민원데이터" / "익산시 악취 민원 데이터.xlsx"  # 구본 보존
+
+# [2026-08-18] 기상 관측을 기상청 API허브 수집본으로 교체 (preprocess/kma_obs.py).
+#   포털 수동 CSV : 57,695행 / 2020-01 ~ 2026-07 / 전운량 없음
+#   API허브 수집본: 66,882행 / 2019-01 ~ 2026-08 / 전운량(CA_TOT) 포함
+#   검증: 2020-01 한 달 744시각을 양쪽으로 받아 대조 -> 기온·습도·풍속·풍향
+#         744/744 완전 일치, 최대차 0.00. 재수집으로 값이 바뀌지 않음을 확인했다.
+WEATHER_CSV = DATA_ROOT / "02_기상데이터" / "asos_146_api_2019_2026.csv"        # 전주 ASOS 146 (API)
+WEATHER_CSV_LEGACY = DATA_ROOT / "02_기상데이터" / "weather_hourly_2020_202607.csv"  # 포털 수동본 보존
 IKSAN_AWS_CSV = DATA_ROOT / "02_기상데이터" / "aws_702_2020_2025_utf8.csv"     # 익산 AWS 702
 ASOS_FULL_CSV = DATA_ROOT / "02_기상데이터" / "asos_146_2020_2025_utf8.csv"  # 전운량 포함 27요소
 
@@ -97,10 +143,11 @@ DEMO_FARM = {
 }
 
 # S0 필터 검증 기준치 (구현 내용.md D1 주의사항 — 다르면 필터 누락)
-EXPECT_RAW_ROWS = 13039
-EXPECT_IKSAN_ROWS = 11955
-EXPECT_LIVESTOCK_ROWS = 5654
-EXPECT_POS_RATE = 0.132
+# [2026-08-18] 민원 재크롤링본(2019-05~2026-08) 기준으로 갱신. 괄호는 구본 값.
+EXPECT_RAW_ROWS = 16113          # (구본 13039)
+EXPECT_IKSAN_ROWS = 14994        # (구본 11955)
+EXPECT_LIVESTOCK_ROWS = 7547     # (구본  5654)
+EXPECT_POS_RATE = 0.132          # 3시간블록 양성률 — v6 는 1시간격자라 참고값
 
 LIVESTOCK_CODE = 101
 

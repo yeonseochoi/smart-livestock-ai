@@ -206,7 +206,9 @@ def _append_midterm(con, now, stamp, last_short) -> int:
         # 폴백 — 단기예보 마지막 날을 D+4~7 로 복제 (mock 경로)
         finding("중기예보 API 미승인/실패 — 단기예보 일집계로 폴백 "
                 "(data.go.kr 에서 MidFcstInfoService 활용신청 필요)")
-        base = pd.read_sql("SELECT * FROM forecast_hourly", con)
+        # [2026-08-18] pd.read_sql 은 커넥션 타입에 따라 동작·경고가 달라진다.
+        #   PostgreSQL 백엔드에서는 어댑터 커넥션을 넘기게 되므로 헬퍼를 쓴다.
+        base = db.fetch_frame(con, "SELECT * FROM forecast_hourly")
         day = base.groupby("date").agg(temp=("temp", "mean"),
                                        rain=("rain", "max")).reset_index()
         mid = {}

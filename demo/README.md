@@ -33,8 +33,8 @@
 저장소 루트/
 ├── demo/                    ← 이 폴더
 ├── 프로젝트 데이터/
-│   ├── 01_민원데이터/익산시 악취 민원 데이터.xlsx
-│   ├── 02_기상데이터/weather_hourly_2020_202607.csv · aws_702_… · asos_146_…
+│   ├── 01_민원데이터/익산시 악취 민원 데이터_20190528-20260818.xlsx   ← 현행(2019.05~)
+│   ├── 02_기상데이터/asos_146_api_2019_2026.csv · aws_702_… · asos_146_…
 │   ├── 03_RAG_법령매뉴얼/*.pdf
 │   ├── 04_양돈센서_AIHub/validation_matched_sensor_30m.xlsx
 │   ├── 05_지오코딩_결과/farm_coords_vworld.csv        ← 익산 농가 좌표
@@ -65,6 +65,26 @@ python run_train_region.py          # 지역 격자 병행 트랙 (실험)
 API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(주거건물),
 `ANTHROPIC_API_KEY`(에이전트 LLM)가 없으면 mock 폴백으로 돌고 콘솔에 로깅된다.
 
+> `KMA_KEY` 는 **설정하지 말 것.** `serving/kma_midterm.py` 의 `_service_key()` 가
+> 환경변수 경로에만 `unquote()` 가 없어서, 설정하면 이중 인코딩으로 중기예보가
+> 조용히 깨진다. 설정하지 않으면 파일 안의 폴백 키로 정상 동작한다.
+
+### 서빙 DB — PostgreSQL(Supabase) / SQLite
+
+`DATABASE_URL` 이 있으면 PostgreSQL, 없으면 기존 `out/demo.db` 로 자동 폴백한다.
+백엔드가 무엇이든 호출부 코드는 동일하다 (`serving/db.py` 가 자리표시자를 번역한다).
+
+```powershell
+copy demo\.env.example demo\.env      # DATABASE_URL 을 채운다 (.env 는 커밋 안 됨)
+python -m serving.migrate_sqlite_to_pg          # 미리보기
+python -m serving.migrate_sqlite_to_pg --apply  # 기존 demo.db 내용 복사 (선택)
+```
+
+PostgreSQL 로 옮긴 이유는 시각화가 아니라 **무인 운영**이다. GitHub Actions 는 잡이
+끝나면 컨테이너가 사라져 `demo.db` 가 증발한다 (`.github/workflows/daily-serve.yml`).
+Supabase 접속 문자열은 반드시 **Session/Transaction pooler** 쪽을 쓴다 —
+Direct connection 은 무료 티어에서 IPv6 전용이라 Actions 러너에서 붙지 않는다.
+
 ---
 
 ## 파트별 진입점
@@ -72,7 +92,7 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
 | 파트 | 담당 영역 | 코드 | 실행/재현 |
 | --- | --- | --- | --- |
 | **A** | 데이터·모델 | `preprocess/`(clean_data → build_grid → build_features/spatial_features) → `model/train_model.py` | `python run_train.py`. 모델 실험은 `model/train_model.py` 하이퍼파라미터 + `preprocess/build_features.py` 피처 리스트 수정 |
-| **B** | 운영 배관 | `serving/` — db.py(SQLite), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
+| **B** | 운영 배관 | `serving/` — db.py(PostgreSQL/SQLite 이중 백엔드), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
 | **C** | RAG | `rag/` — ingest.py(조문 청킹+위계 메타), search.py(ko-sroberta+위계 부스트), eval_qa_v2.py(30문항) | 평가 재실행: `python archive/demo_v3.py` 의 v3-12 구간. 시행령 별표 원문(DOC) 도착 시 `python -m rag.reingest_annex <파일.docx>` |
 | **D** | 에이전트 | `agents/` — work_guide.py(작업 가이드), notify_draft.py(주민 알림), tools_schema.py(도구 6종 스키마) | `archive/demo.py` ⑥ 구간. ANTHROPIC_API_KEY 설정 시 Claude tool use 로 전환되는 구조 |
 
@@ -249,6 +269,7 @@ demo/
   config.py             경로 · 그룹 정의 · 기상 지점 · 분할 연도
 
   preprocess/           ── 데이터 준비
+    kma_obs.py          기상청 API허브 지상관측 수집 (포털 수동 CSV 대체)
     clean_data.py       민원 xlsx · 기상 csv 정제
     geocode_gimje.py    김제 농가 리(里) 단위 재지오코딩
     build_grid.py       격자 생성 + 정답 라벨
@@ -259,7 +280,8 @@ demo/
     train_model.py      XGBoost 학습 · 평가 · 등급컷
 
   serving/              ── 매일 도는 채점 (예보 → 위험도 → DB)
-    db.py               SQLite 스키마
+    db.py               DB 스키마 (PostgreSQL/SQLite 이중 백엔드)
+    migrate_sqlite_to_pg.py  기존 demo.db -> PostgreSQL 1회 복사
     daily_scoring.py    예보 → 모델 → 위험도 → DB
     kma_midterm.py      중기예보 API
     scheduler.py        정기 실행
@@ -316,6 +338,11 @@ demo/
 | 농촌근거리 | test 2025 | 0.724 | 0.074 | 2.5배 | 48.8% | 평균의 1/7.3 |
 
 중기예보용 reduced 모델(7피처, 바람 없음): 시가지 test PR-AUC 0.185(lift 6.4배) / 농촌 0.082(2.8배).
+
+> **[2026-08-18]** 위 표는 구 데이터셋(민원 13,039행 · 포털 기상 CSV) 기준 값이다.
+> 민원 재크롤링(2019.05~, +33%)과 기상 API 전환 이후 재학습한 값은
+> `out/training_results.json` 을 볼 것. 시가지 test ROC-AUC 0.8977 · 농촌 0.7442 로
+> 사실상 재현됐으나, 발표용 수치 갱신 여부는 미정이라 표는 그대로 둔다.
 
 **이 표의 값은 `run_train.py` 가 `out/training_results.json` 에 기록한다.**
 문서와 파일이 다르면 파일이 옳다. 손으로 옮겨 적다 틀린 전례가 있어 지표를 코드로 옮겼다.
