@@ -1,9 +1,9 @@
 """RAG 이전 전 구간 정밀 점검 — 학습 · 서빙 · 추천."""
-import json, pickle, sqlite3, sys
+import json, pickle, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np, pandas as pd
-from config import (MID_DIR, DB_PATH, GROUPS, REGION_GROUP, SPLIT_TRAIN_END,
+from config import (MID_DIR, GROUPS, REGION_GROUP, SPLIT_TRAIN_END,
                     SPLIT_VALID_YEAR, SPLIT_TEST_YEAR, WEATHER_SOURCE)
 from console import use_utf8_stdout
 
@@ -85,11 +85,16 @@ for g in GROUPS:
     chk(f"{g} 각 분할에 양성 존재", min(n) > 0, f"train {n[0]} / valid {n[1]} / test {n[2]}")
 
 print("\n" + "=" * 78); print(" 5. 서빙 DB"); print("=" * 78)
-con = sqlite3.connect(DB_PATH)
-sch = con.execute("SELECT sql FROM sqlite_master WHERE name='risk_hourly'").fetchone()
+# [2026-08-18] SQLite 전용 검사였다. sqlite_master 조회와 pd.read_sql 을
+#   백엔드 중립 헬퍼로 바꿨다 — PostgreSQL 은 pg_index 를 본다.
+#   항목 수(39)는 그대로다.
+from serving import db
+print(f"  백엔드: {db.describe()}")
+con = db.connect()
+pk = db.primary_key_columns(con, "risk_hourly")
 chk("risk_hourly 스키마 PK(date,hour,grp)",
-    sch and "PRIMARY KEY(date, hour, grp)" in sch[0])
-d = pd.read_sql("SELECT * FROM risk_hourly", con)
+    pk == ["date", "hour", "grp"], "PK " + (", ".join(pk) or "없음"))
+d = db.fetch_frame(con, "SELECT * FROM risk_hourly")
 chk("서빙 결과 적재됨", len(d) > 0, f"{len(d)}행")
 chk("두 그룹 모두 적재", set(d["grp"]) == set(GROUPS))
 chk("시각당 그룹 2행 (덮어쓰기 없음)",

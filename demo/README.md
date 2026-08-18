@@ -65,6 +65,26 @@ python run_train_region.py          # 지역 격자 병행 트랙 (실험)
 API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(주거건물),
 `ANTHROPIC_API_KEY`(에이전트 LLM)가 없으면 mock 폴백으로 돌고 콘솔에 로깅된다.
 
+> `KMA_KEY` 는 **설정하지 말 것.** `serving/kma_midterm.py` 의 `_service_key()` 가
+> 환경변수 경로에만 `unquote()` 가 없어서, 설정하면 이중 인코딩으로 중기예보가
+> 조용히 깨진다. 설정하지 않으면 파일 안의 폴백 키로 정상 동작한다.
+
+### 서빙 DB — PostgreSQL(Supabase) / SQLite
+
+`DATABASE_URL` 이 있으면 PostgreSQL, 없으면 기존 `out/demo.db` 로 자동 폴백한다.
+백엔드가 무엇이든 호출부 코드는 동일하다 (`serving/db.py` 가 자리표시자를 번역한다).
+
+```powershell
+copy demo\.env.example demo\.env      # DATABASE_URL 을 채운다 (.env 는 커밋 안 됨)
+python -m serving.migrate_sqlite_to_pg          # 미리보기
+python -m serving.migrate_sqlite_to_pg --apply  # 기존 demo.db 내용 복사 (선택)
+```
+
+PostgreSQL 로 옮긴 이유는 시각화가 아니라 **무인 운영**이다. GitHub Actions 는 잡이
+끝나면 컨테이너가 사라져 `demo.db` 가 증발한다 (`.github/workflows/daily-serve.yml`).
+Supabase 접속 문자열은 반드시 **Session/Transaction pooler** 쪽을 쓴다 —
+Direct connection 은 무료 티어에서 IPv6 전용이라 Actions 러너에서 붙지 않는다.
+
 ---
 
 ## 파트별 진입점
@@ -72,7 +92,7 @@ API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(�
 | 파트 | 담당 영역 | 코드 | 실행/재현 |
 | --- | --- | --- | --- |
 | **A** | 데이터·모델 | `preprocess/`(clean_data → build_grid → build_features/spatial_features) → `model/train_model.py` | `python run_train.py`. 모델 실험은 `model/train_model.py` 하이퍼파라미터 + `preprocess/build_features.py` 피처 리스트 수정 |
-| **B** | 운영 배관 | `serving/` — db.py(SQLite), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
+| **B** | 운영 배관 | `serving/` — db.py(PostgreSQL/SQLite 이중 백엔드), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
 | **C** | RAG | `rag/` — ingest.py(조문 청킹+위계 메타), search.py(ko-sroberta+위계 부스트), eval_qa_v2.py(30문항) | 평가 재실행: `python archive/demo_v3.py` 의 v3-12 구간. 시행령 별표 원문(DOC) 도착 시 `python -m rag.reingest_annex <파일.docx>` |
 | **D** | 에이전트 | `agents/` — work_guide.py(작업 가이드), notify_draft.py(주민 알림), tools_schema.py(도구 6종 스키마) | `archive/demo.py` ⑥ 구간. ANTHROPIC_API_KEY 설정 시 Claude tool use 로 전환되는 구조 |
 
@@ -260,7 +280,8 @@ demo/
     train_model.py      XGBoost 학습 · 평가 · 등급컷
 
   serving/              ── 매일 도는 채점 (예보 → 위험도 → DB)
-    db.py               SQLite 스키마
+    db.py               DB 스키마 (PostgreSQL/SQLite 이중 백엔드)
+    migrate_sqlite_to_pg.py  기존 demo.db -> PostgreSQL 1회 복사
     daily_scoring.py    예보 → 모델 → 위험도 → DB
     kma_midterm.py      중기예보 API
     scheduler.py        정기 실행
