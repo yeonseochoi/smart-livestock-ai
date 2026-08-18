@@ -58,22 +58,33 @@ def _check_dependencies() -> None:
     if missing:
         raise ImportError(
             "다음 패키지가 설치되어 있지 않습니다: " + ", ".join(missing) + "\n"
-            "아래 순서로 설치하세요(순서 중요 — langchain-community 충돌 회피):\n"
-            "  python -m pip install ragas\n"
-            '  python -m pip install "langchain-community<0.4"'
+            "demo/rag_yujin/requirements.txt로 의존성을 설치하세요:\n"
+            "  python -m pip install -r demo/rag_yujin/requirements.txt"
         )
+
+    # ── langchain-community 버전 검사 ────────────────────────────────
+    # "패키지가 아예 없는 경우"와 "패키지는 있는데 버전이 안 맞는 경우"를
+    # 분리한다. 예전엔 이 둘을 하나의 try 블록에 넣고 except ImportError로
+    # 같이 잡았는데, 그러면 버전 비호환으로 일부러 던진 오류까지
+    # "langchain_community 자체가 없나보다" 하고 조용히 무시돼서, 호환 안 되는
+    # 버전에서도 평가 단계까지 그냥 넘어가는 문제가 있었다.
     try:
         import langchain_community
-        major, minor = (int(x) for x in langchain_community.__version__.split(".")[:2])
-        if (major, minor) >= (0, 4):
-            raise ImportError(
-                f"langchain-community가 {langchain_community.__version__}로 설치되어 있는데, "
-                "0.4.x 이상에서는 ragas가 import 단계에서 바로 깨집니다"
-                "(langchain_community.chat_models.vertexai 모듈이 삭제됨).\n"
-                '  python -m pip install "langchain-community<0.4" 로 낮춰주세요.'
-            )
     except ImportError:
-        pass  # langchain_community 자체가 없는 경우는 _1_loader.py 쪽에서 이미 체크함
+        # langchain_community 자체가 없는 경우 — requirements.txt 설치가 안 된
+        # 상태이므로 여기서 막지 않아도 곧 다른 import에서 자연히 실패한다.
+        return
+
+    major, minor = (
+        int(x) for x in langchain_community.__version__.split(".")[:2]
+    )
+    if (major, minor) >= (0, 4):
+        raise RuntimeError(
+            f"langchain-community가 {langchain_community.__version__}로 설치되어 있는데, "
+            "0.4.x 이상에서는 ragas가 import 단계에서 바로 깨집니다"
+            "(langchain_community.chat_models.vertexai 모듈이 삭제됨).\n"
+            '  python -m pip install "langchain-community<0.4" 로 낮춰주세요.'
+        )
 
 
 def _sample_relevant_chunks(vectorstore):

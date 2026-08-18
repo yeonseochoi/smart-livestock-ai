@@ -1,0 +1,27 @@
+# rag_yujin 전용 의존성.
+# 루트 requirements.txt(pandas, sentence-transformers 등 팀 공통 ML 의존성)를 먼저 설치하고,
+# 이어서 이 파일을 설치하세요:
+#   python -m pip install -r ../requirements.txt
+#   python -m pip install -r requirements.txt
+#
+# 아래 버전은 2026-08-18 기준, 실제로 RAG 파이프라인(_1_loader.py ~ _6_2_RAGAS_test.py)이
+# 정상 동작한 환경에서 `pip freeze`로 확인한 값으로 고정했습니다.
+#
+# langchain-community는 0.4 미만이어야 합니다. 0.4.x부터
+# langchain_community.chat_models.vertexai 모듈이 삭제되어 있어서, ragas가 이 모듈을
+# import하는 과정에서 그대로 깨집니다(_6_2_RAGAS_test.py의 _check_dependencies()가
+# 이 문제를 감지해 알려줍니다).
+langchain-core==1.5.5
+langchain-community==0.3.31
+langchain-text-splitters==1.1.2
+langchain-huggingface==1.2.2
+langchain-chroma==1.1.0
+chromadb==1.5.9
+langchain-google-genai==4.3.4
+python-dotenv==1.2.2
+PyMuPDF==1.28.2
+sentence-transformers==5.7.0
+
+# RAGAS 평가(_6_2_RAGAS_test.py)용. 0.4.3이 langchain-community 0.3.31 조합에서
+# 실제로 동작 확인된 버전이므로 이 버전으로 고정합니다.
+ragas==0.4.3

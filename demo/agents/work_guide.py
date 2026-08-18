@@ -9,6 +9,7 @@ ANTHROPIC_API_KEY 가 있으면 Claude tool use, 없으면 같은 도구를 규�
 """
 from __future__ import annotations
 
+import json
 import os
 
 from config import PROV
@@ -19,6 +20,13 @@ SYSTEM = (
     "출력은 '추천 창/대안 창/작업 전·후 조치/판단 근거' 4개 절로 고정한다. "
     "판단 근거에는 문헌·법령과 '익산 6년 실측' 통계를 함께 인용한다."
 )
+
+# .env 또는 환경변수(ANTHROPIC_MODEL_NAME)로 override 가능.
+# 계정에서 실제 사용 가능한 모델명인지 반드시 확인할 것
+# (https://docs.claude.com/en/docs/about-claude/models) — 잘못된 모델명은
+# 다른 API(제미나이)에서 겪었던 것과 동일하게 404 로 조용히 실패한다.
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL_NAME", "claude-sonnet-4-5-20250929")
+MAX_TOOL_TURNS = 6  # 무한루프 방지 — 이 안에 end_turn 못 내면 오프라인 폴백
 
 
 def _offline_guide(tools: LocalTools, farm_id: str, work_type: str) -> str:
@@ -70,15 +78,93 @@ def _offline_guide(tools: LocalTools, farm_id: str, work_type: str) -> str:
     return "\n".join(lines)
 
 
+def _call_tool(tools: LocalTools, name: str, tool_input: dict) -> dict:
+    """LocalTools 메서드 이름으로 디스패치. 도구 실행이 실패해도 예외를 올리지
+    않고 {"error": ...} 로 돌려준다 — LLM 이 실패를 보고 다른 도구로 재시도하거나
+    설명에 반영할 수 있게 하기 위해서다."""
+    method = {
+        "get_risk_calendar": tools.get_risk_calendar,
+        "get_forecast": tools.get_forecast,
+        "get_storage_days": tools.get_storage_days,
+        "search_rag": tools.search_rag,
+        "get_farm_config": tools.get_farm_config,
+        "get_plume_assessment": tools.get_plume_assessment,
+    }.get(name)
+    if method is None:
+        return {"error": f"알 수 없는 도구: {name}"}
+    try:
+        return method(**tool_input)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _run_api_guide(tools: LocalTools, farm_id: str, work_type: str) -> str | None:
+    """Claude API tool-use 루프. TOOLS 스키마 그대로 사용하고, 도구 호출은
+    LocalTools 로 위임한다(오프라인 폴백과 동일 구현 공유).
+
+    실패/미완료 시 None 을 돌려준다 — 호출부(run())가 오프라인으로 폴백한다.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic()
+    user_msg = (
+        f"farm_id={farm_id!r}, work_type={work_type!r} 에 대한 작업 가이드를 "
+        "작성해줘. get_risk_calendar 로 위험도 창부터 확인하고, get_storage_days"
+        "(분뇨 저장 경과일), search_rag(법령·매뉴얼 근거), 필요하면 "
+        "get_plume_assessment(참고용, 등급에는 반영 금지)까지 도구를 호출해서 "
+        "근거를 모은 다음 답해."
+    )
+    messages = [{"role": "user", "content": user_msg}]
+
+    for _ in range(MAX_TOOL_TURNS):
+        resp = client.messages.create(
+            model=ANTHROPIC_MODEL, max_tokens=1024,
+            system=SYSTEM, tools=TOOLS, messages=messages,
+        )
+        if resp.stop_reason != "tool_use":
+            text = "".join(b.text for b in resp.content if b.type == "text").strip()
+            return text or None
+
+        messages.append({"role": "assistant", "content": resp.content})
+        tool_results = []
+        for block in resp.content:
+            if block.type != "tool_use":
+                continue
+            result = _call_tool(tools, block.name, block.input)
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": json.dumps(result, ensure_ascii=False, default=str),
+            })
+        messages.append({"role": "user", "content": tool_results})
+
+    return None  # MAX_TOOL_TURNS 안에 end_turn 을 못 받음 — 폴백
+
+
 def run(farm_id: str, work_type: str, rag_index=None) -> str:
     tools = LocalTools(rag_index)
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        try:
-            import anthropic  # noqa: F401
-            PROV.log("S7 작업가이드 LLM", "Claude API (tool use)", real=True)
-            # 실 API 루프는 tools_schema.TOOLS 로 구성 (데모 환경에서는 미실행 경로)
-        except ImportError:
-            pass
-    PROV.log("S7 작업가이드", "오프라인 규칙 폴백", real=False,
-             note="ANTHROPIC_API_KEY 미설정 — 도구 6종은 동일 사용")
-    return _offline_guide(tools, farm_id, work_type)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        PROV.log("S7 작업가이드", "오프라인 규칙 폴백", real=False,
+                 note="ANTHROPIC_API_KEY 미설정 — 도구 6종은 동일 사용")
+        return _offline_guide(tools, farm_id, work_type)
+
+    try:
+        import anthropic  # noqa: F401
+    except ImportError:
+        PROV.log("S7 작업가이드", "anthropic 패키지 미설치 — 오프라인 폴백", real=False)
+        return _offline_guide(tools, farm_id, work_type)
+
+    PROV.log("S7 작업가이드 LLM", f"Claude API tool use ({ANTHROPIC_MODEL})", real=True)
+    try:
+        result = _run_api_guide(tools, farm_id, work_type)
+    except Exception as exc:
+        PROV.log("S7 작업가이드", "API 호출 예외 — 오프라인 폴백", real=False, note=str(exc))
+        return _offline_guide(tools, farm_id, work_type)
+
+    if not result:
+        PROV.log("S7 작업가이드", "API 루프 빈 응답 — 오프라인 폴백", real=False,
+                 note=f"{MAX_TOOL_TURNS}턴 내 종료 실패 또는 빈 텍스트")
+        return _offline_guide(tools, farm_id, work_type)
+
+    return result

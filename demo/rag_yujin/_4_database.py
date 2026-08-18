@@ -49,6 +49,27 @@ def _check_dependencies() -> None:
         )
 
 
+def _validate_persist_dir(persist_dir: Path) -> Path:
+    """persist_dir가 우리가 의도한 벡터 DB 경로가 맞는지 확인한다.
+
+    build_vector_store()는 이 경로를 통째로 shutil.rmtree()로 지우기 때문에,
+    호출하는 쪽 실수(혹은 향후 리팩터링)로 엉뚱한 경로(예: 루트, 홈 디렉터리)가
+    들어오면 큰 사고로 이어질 수 있다. 그래서 지우기 전에 "우리가 아는 그 경로"인지
+    반드시 확인한다.
+    """
+    target = Path(persist_dir).resolve()
+    expected = PERSIST_DIR.resolve()
+    if target != expected:
+        raise ValueError(
+            "벡터 DB 초기화가 허용되지 않은 경로입니다.\n"
+            f"  요청 경로: {target}\n"
+            f"  허용 경로: {expected}"
+        )
+    if target.exists() and not target.is_dir():
+        raise ValueError(f"벡터 DB 경로가 디렉터리가 아닙니다: {target}")
+    return target
+
+
 def build_vector_store(
     chunks: list[Document],
     embedding_fn,
@@ -58,6 +79,8 @@ def build_vector_store(
     """chunks를 embedding_fn으로 임베딩해서 Chroma에 저장하고, 만든 벡터스토어를 반환한다."""
     _check_dependencies()
     from langchain_chroma import Chroma
+
+    persist_dir = _validate_persist_dir(persist_dir)
 
     if persist_dir.exists():
         print(f"  기존 DB 폴더를 지우고 새로 만듭니다: {persist_dir}")
