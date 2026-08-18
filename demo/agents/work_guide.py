@@ -6,6 +6,8 @@ LLM은 이 결과를 바꾸지 않고 별도 모듈에서 설명만 작성한다
 """
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -15,10 +17,19 @@ from constants import TIME_WEIGHTS
 from agents.contracts import GuideCard, WorkWindow
 from agents.provider import DecisionProvider
 from agents.scoring_policy import WORK_WEIGHT, storage_factor
-from agents.tools_schema import AgentTools, LocalTools
+from agents.tools_schema import AgentTools, LocalTools, TOOLS, dispatch_tool
 
 
 _GRADE_ORDER = {"낮음": 0, "주의": 1, "위험": 2}
+ANTHROPIC_MODEL = os.environ.get(
+    "ANTHROPIC_MODEL_NAME", "claude-sonnet-4-5-20250929"
+)
+MAX_TOOL_TURNS = 6
+CLAUDE_SYSTEM = (
+    "너는 양돈농가 작업 가이드다. 애플리케이션이 확정한 추천·회피 창, 점수와 "
+    "등급을 변경하지 말고, 반드시 도구를 호출해 근거를 확인한 뒤 설명한다. "
+    "출력은 '추천 창/대안 창/작업 전·후 조치/판단 근거' 4개 절로 구성한다."
+)
 
 
 def _build_windows(
@@ -181,14 +192,75 @@ def format_guide(guide: GuideCard | dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _run_api_guide(tools: AgentTools, guide: GuideCard) -> str | None:
+    """PR #9의 Claude tool-use 루프를 현재 provider 구조에 맞춰 실행한다."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+    user_msg = (
+        "아래 작업 계획을 변경하지 말고 도구로 근거를 확인해 설명하세요.\n"
+        + json.dumps(guide.to_dict(), ensure_ascii=False)
+    )
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
+
+    for _ in range(MAX_TOOL_TURNS):
+        response = client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=1024,
+            system=CLAUDE_SYSTEM,
+            tools=TOOLS,
+            messages=messages,
+        )
+        if response.stop_reason != "tool_use":
+            text = "".join(
+                block.text for block in response.content if block.type == "text"
+            ).strip()
+            return text or None
+
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            result = dispatch_tool(tools, block.name, dict(block.input))
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": json.dumps(result, ensure_ascii=False, default=str),
+            })
+        messages.append({"role": "user", "content": tool_results})
+
+    return None
+
+
 def run(farm_id: str, work_type: str, rag_index: Any = None) -> str:
-    """기존 ``demo.py`` 호환 진입점."""
+    """기존 ``demo.py`` 호환 진입점과 Claude API 폴백을 함께 유지한다."""
 
     tools = LocalTools(rag_index)
     try:
         guide = plan_work(tools.provider, farm_id, work_type)
     except RuntimeError as exc:
         return str(exc)
+
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            result = _run_api_guide(tools, guide)
+        except Exception as exc:
+            PROV.log(
+                "S7 작업가이드",
+                "Claude API 호출 실패 — 결정론적 결과 폴백",
+                real=False,
+                note=str(exc),
+            )
+        else:
+            if result:
+                PROV.log(
+                    "S7 작업가이드 LLM",
+                    f"Claude API tool use ({ANTHROPIC_MODEL})",
+                    real=True,
+                )
+                return result
+
     PROV.log("S7 작업가이드", "agents/work_guide.py 결정론적 오케스트레이션",
              real=False, note="LLM 없이도 동일 추천 결과")
     return format_guide(guide)
