@@ -58,11 +58,7 @@ class LocalTools:
 
     def get_risk_calendar(self, farm_id: str, days: int = 3,
                           work_type: str = "청소") -> list[dict]:
-        # _load_calendar() 는 {그룹명: {시각: {prob, grade}}} 형태다 (단일 시각
-        # dict 가 아니다). 그룹별로 window_risk 를 구한 뒤 최댓값으로 보수적
-        # 조합한다 — advisor.recommend.combine("max") 와 동일 원칙
-        # (절대규칙 1: ML과 플룸을 곱하지 않는다 / 여기서는 그룹 간 max 선택).
-        cal_by_group = _load_calendar()
+        cal = _load_calendar()
         con = db.connect()
         row = con.execute("SELECT last_manure_removal_date FROM farm_config "
                           "WHERE farm_id=?", (farm_id,)).fetchone()
@@ -71,24 +67,14 @@ class LocalTools:
         if row and row[0]:
             sdays = (datetime.now() - datetime.strptime(row[0], "%Y-%m-%d")).days
         sf = storage_factor(sdays)
-        if not cal_by_group:
-            return []
-
-        all_times = sorted({t for gcal in cal_by_group.values() for t in gcal})
         out = []
-        for t in all_times:
-            per_group = {}
-            for g, gcal in cal_by_group.items():
-                wr = window_risk(gcal, t)
-                if wr is not None:
-                    per_group[g] = wr
-            if not per_group:
+        for t in sorted(cal):
+            wr = window_risk(cal, t)
+            if wr is None:
                 continue
-            worst_group = max(per_group, key=per_group.get)
-            wr_combined = per_group[worst_group]
             out.append({"t": t.strftime("%Y-%m-%d %H시"), "dow": t.weekday(),
-                        "final": round(wr_combined * WORK_WEIGHT.get(work_type, 1.0) * sf, 4),
-                        "grade": cal_by_group[worst_group][t]["grade"]})
+                        "final": round(wr * WORK_WEIGHT.get(work_type, 1.0) * sf, 4),
+                        "grade": cal[t]["grade"]})
         return out[: days * 8]
 
     def get_forecast(self, days: int = 3) -> dict:
