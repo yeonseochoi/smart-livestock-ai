@@ -1,5 +1,5 @@
 # 검증 환경 (Python 3.10, 2026-08-10) 에서 확인된 버전 고정.
-# 상위 버전도 대체로 동작하나, shap-xgboost 조합은 버전 민감 (s3_train.py 주석 참조).
+# 상위 버전도 대체로 동작하나, shap-xgboost 조합은 버전 민감 (train_model.py 주석 참조).
 pandas==2.3.0
 numpy==2.1.3
 pyarrow==20.0.0
@@ -13,3 +13,8 @@ pypdf==6.15.0
 pdfplumber==0.11.10
 sentence-transformers==5.7.0
 apscheduler==3.11.3
+
+# 서빙 DB — PostgreSQL(Supabase) 백엔드 (2026-08-18 이관).
+#   DATABASE_URL 이 없으면 표준 라이브러리 sqlite3 로 폴백하므로,
+#   로컬에서 SQLite 만 쓸 거면 설치하지 않아도 된다.
+psycopg[binary]==3.3.4

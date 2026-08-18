@@ -1,6 +1,6 @@
 """D 에이전트가 사용하는 데이터 포트와 provider factory.
 
-`app/`은 provider 구현을 직접 알지 않는다. 기본값은 명시적인 fixture이며,
+`app/`은 provider 구현을 직접 알지 않는다. 기본값은 current main adapter이며,
 실데이터 연결 시 ``D_PROVIDER_FACTORY=package.module:create_provider``만 바꾼다.
 연결 실패를 fixture로 조용히 대체하지 않아 출처 오인을 막는다.
 """
@@ -47,15 +47,15 @@ def create_provider(
 ) -> DecisionProvider:
     """환경 설정에 맞는 provider를 반환한다.
 
-    기본 fixture는 공식 자료 대기 중인 상태를 명확히 표시한다. 기존 B/C/legacy
-    데모를 연결하려면 ``D_PROVIDER_MODE=legacy``를 명시한다.
+    기본값은 current main의 ``serving.db``와 RAG를 연결하는 legacy adapter다.
+    고정 구조 검증 데이터가 필요할 때만 ``D_PROVIDER_MODE=fixture``를 명시한다.
     """
 
     spec = os.getenv("D_PROVIDER_FACTORY", "").strip()
     if spec:
         return _load_factory(spec)(storage_days=storage_days, rag_index=rag_index)
 
-    mode = os.getenv("D_PROVIDER_MODE", "fixture").strip().lower()
+    mode = os.getenv("D_PROVIDER_MODE", "legacy").strip().lower()
     if mode == "fixture":
         from agents.fixture_provider import FixtureProvider
 

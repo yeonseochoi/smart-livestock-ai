@@ -59,7 +59,6 @@ class FixtureProvider:
                     "risk": "fixture",
                     "rag": "fixture",
                     "plume": "fixture_unverified",
-                    "notification": "draft_only",
                 },
             },
             "D 고정 시연 시나리오",
@@ -120,19 +119,21 @@ class FixtureProvider:
             return self._missing("농가", farm_id)
         days = max(1, min(int(days), 7))
         base = (0.29, 0.23, 0.14, 0.10, 0.16, 0.25, 0.37, 0.43)
+        hourly_adjust = (0.015, 0.0, -0.01)
         adjust = (0.00, 0.03, -0.02)
         items: list[dict[str, Any]] = []
         for offset in range(1, days + 1):
             target = self.today + timedelta(days=offset)
             if offset <= 3:
-                for block, raw_score in enumerate(base):
+                for hour in range(24):
+                    raw_score = base[hour // 3] + hourly_adjust[hour % 3]
                     score = max(0.01, min(0.95, raw_score + adjust[offset - 1]))
                     start = datetime.combine(
-                        target, time(hour=block * 3), tzinfo=KST
+                        target, time(hour=hour), tzinfo=KST
                     )
                     items.append({
-                        "date": target.isoformat(), "block": block,
-                        "start": start.isoformat(), "resolution": "3h",
+                        "date": target.isoformat(), "hour": hour,
+                        "start": start.isoformat(), "resolution": "1h",
                         "risk_score": round(score, 4),
                         "risk_grade": self._grade(score), "horizon": "D+1~3",
                         "model_type": "fixture-full", "model_version": "fixture-v2",
@@ -142,7 +143,7 @@ class FixtureProvider:
             else:
                 score = round(sum(base) / len(base) + (offset - 5) * 0.015, 4)
                 items.append({
-                    "date": target.isoformat(), "block": None, "start": None,
+                    "date": target.isoformat(), "hour": None, "start": None,
                     "resolution": "day", "risk_score": score,
                     "risk_grade": self._grade(score), "horizon": "D+4~7",
                     "model_type": "fixture-reduced", "model_version": "fixture-v2",
@@ -202,6 +203,7 @@ class FixtureProvider:
         results = [
             {
                 "rank": 1, "id": "fixture-manual-1",
+                "source_file": "축산농장 악취저감시설 운영 매뉴얼(돼지)",
                 "doc": "축산농장 악취저감시설 운영 매뉴얼(돼지)",
                 "unit": "시연용 근거 자리표시자", "page": None,
                 "hier": "매뉴얼", "score": 0.78,
@@ -210,6 +212,7 @@ class FixtureProvider:
             },
             {
                 "rank": 2, "id": "fixture-ordinance-1",
+                "source_file": "익산시 악취방지 및 저감 조례",
                 "doc": "익산시 악취방지 및 저감 조례",
                 "unit": "시연용 근거 자리표시자", "page": None,
                 "hier": "조례", "score": 0.64,

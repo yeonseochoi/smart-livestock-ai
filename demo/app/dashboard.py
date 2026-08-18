@@ -1,7 +1,7 @@
 """D 파트 Streamlit 시연 화면.
 
 실행: ``cd demo; streamlit run app/dashboard.py``
-추천 계산·RAG 결합·알림 초안은 모두 ``agents/``가 담당한다.
+추천 계산·RAG 결합·선택적 Gemini 설명은 모두 ``agents/``가 담당한다.
 """
 from __future__ import annotations
 
@@ -18,8 +18,7 @@ DEMO_DIR = Path(__file__).resolve().parents[1]
 if str(DEMO_DIR) not in sys.path:
     sys.path.insert(0, str(DEMO_DIR))
 
-from agents.notify_draft import approve_for_demo, create_draft
-from agents.openai_explainer import compose, is_configured
+from agents.gemini_explainer import compose, is_configured
 from agents.provider import create_provider
 from agents.work_guide import plan_work, rule_based_summary
 
@@ -58,10 +57,7 @@ def _fingerprint(
 
 
 def _reset_decision_state() -> None:
-    for key in (
-        "d_guide", "d_summary", "d_draft", "d_approval", "d_window",
-        "d_selected_window",
-    ):
+    for key in ("d_guide", "d_summary"):
         st.session_state.pop(key, None)
 
 
@@ -110,7 +106,7 @@ def _calendar_frame(response: dict[str, Any]) -> pd.DataFrame:
     for item in (response.get("data") or {}).get("items", []):
         rows.append({
             "날짜": item.get("date"),
-            "시간": "일 단위" if item.get("block") is None else f"{int(item['block']) * 3:02d}시",
+            "시간": "일 단위" if item.get("hour") is None else f"{int(item['hour']):02d}시",
             "해상도": item.get("resolution"), "민원 위험지수": item.get("risk_score"),
             "등급": item.get("risk_grade"), "예측구간": item.get("horizon"),
             "유효시각": item.get("valid_at"),
@@ -138,9 +134,9 @@ def main() -> None:
         work_type = st.selectbox("작업 유형", WORK_TYPES)
         storage_days = st.slider("분뇨 저장 경과일", 0, 30, 12)
         use_basemap = st.checkbox("온라인 배경지도 사용", value=False)
-        use_openai = st.checkbox(
-            "OpenAI 설명 사용", value=False, disabled=not is_configured(),
-            help="OPENAI_API_KEY와 OPENAI_MODEL이 모두 있을 때만 선택할 수 있습니다.",
+        use_gemini = st.checkbox(
+            "Gemini 설명 사용", value=False, disabled=not is_configured(),
+            help="GOOGLE_API_KEY가 있을 때만 선택할 수 있습니다.",
         )
 
     try:
@@ -173,7 +169,7 @@ def main() -> None:
     cols[3].metric("위험자료", _source_label(calendar).split(" · ")[0])
 
     map_tab, plan_tab, evidence_tab, limits_tab = st.tabs(
-        ["① 측정소 지도", "② 캘린더·작업계획", "③ 근거·알림", "④ 데이터·한계"]
+        ["① 측정소 지도", "② 캘린더·작업계획", "③ RAG 근거", "④ 데이터·한계"]
     )
     with map_tab:
         st.subheader("현재·과거 측정소 관측")
@@ -195,15 +191,13 @@ def main() -> None:
                 guide = guide_obj.to_dict()
                 st.session_state["d_guide"] = guide
                 st.session_state["d_summary"] = rule_based_summary(guide)
-                st.session_state.pop("d_draft", None)
-                st.session_state.pop("d_approval", None)
-                if use_openai:
+                if use_gemini:
                     try:
-                        generated = compose(provider, guide_obj)
+                        generated = compose(guide_obj)
                         if generated:
                             st.session_state["d_summary"] = generated
                     except Exception as exc:
-                        st.warning(f"OpenAI 설명 실패: 규칙 기반 설명을 유지합니다. ({exc})")
+                        st.warning(f"Gemini 설명 실패: 규칙 기반 설명을 유지합니다. ({exc})")
             except Exception as exc:
                 st.error(f"작업 계획 생성 실패: {exc}")
 
@@ -223,41 +217,16 @@ def main() -> None:
             st.subheader("근거 카드")
             if guide["evidence"]:
                 for item in guide["evidence"]:
-                    st.markdown(f"**{item.get('doc')} · {item.get('unit')}**")
-                    st.caption(f"쪽수: {item.get('page') or '미확인'} · 검색점수는 신뢰확률 아님")
+                    source = item.get("source_file") or item.get("doc") or "출처 미확인"
+                    st.markdown(f"**{source} · {item.get('unit') or '단원 미확인'}**")
+                    page = item.get("page")
+                    st.caption(
+                        f"쪽수: {page if page is not None else '미확인'} · "
+                        "검색 순위는 신뢰확률 아님"
+                    )
                     st.write(item.get("snippet", ""))
             else:
                 st.warning("검색 근거가 없습니다. 공식 원문을 확인하세요.")
-
-            options = guide["recommended"]
-            labels = [f"{item['start']} ~ {item['end']} ({item['grade']})" for item in options]
-            selected_index = st.selectbox(
-                "확정할 작업 창", range(len(options)), format_func=lambda i: labels[i],
-                key="d_window",
-            )
-            selected = options[selected_index]
-            selected_token = f"{selected['start']}|{selected['end']}"
-            if st.session_state.get("d_selected_window") != selected_token:
-                st.session_state["d_selected_window"] = selected_token
-                st.session_state.pop("d_draft", None)
-                st.session_state.pop("d_approval", None)
-            if st.button("알림 초안 만들기"):
-                st.session_state["d_draft"] = create_draft(
-                    provider, guide["farm_id"], guide["work_type"], selected
-                ).to_dict()
-                st.session_state.pop("d_approval", None)
-
-            draft = st.session_state.get("d_draft")
-            if draft:
-                edited = st.text_area("주민 알림 문구", draft["message"], height=150)
-                st.caption(
-                    f"대상 후보 {draft['audience_count']} · 가상 여부 {draft['audience_is_mock']} · "
-                    f"플룸 {draft['plume_status']} (등급 미반영)"
-                )
-                if st.button("농장주 승인 기록"):
-                    st.session_state["d_approval"] = approve_for_demo(draft, message=edited)
-                if st.session_state.get("d_approval"):
-                    st.success("시연 세션에 승인만 기록했습니다. 실제 발송은 하지 않았습니다.")
 
     with limits_tab:
         st.subheader("데이터 상태와 교체 원칙")
@@ -265,8 +234,7 @@ def main() -> None:
         st.markdown(
             "- 측정소 관측과 미래 민원 위험은 서로 다른 데이터 흐름입니다.\n"
             "- D는 A 모델 파일이나 B DB 내부 계산을 복제하지 않고 provider 결과만 사용합니다.\n"
-            "- 실제 자료 도착 후 센서 adapter와 A/B 모델을 검증한 뒤 provider를 교체합니다.\n"
-            "- 플룸과 알림 대상은 검증 전 참고이며 민원 위험 등급에 반영하지 않습니다."
+            "- 실제 자료 도착 후 센서 adapter와 A/B 모델을 검증한 뒤 provider를 교체합니다."
         )
 
 

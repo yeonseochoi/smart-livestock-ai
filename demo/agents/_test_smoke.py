@@ -2,7 +2,8 @@
 
 순서:
   1) py run_serve.py   ← risk_hourly / forecast_hourly / farm_config 채움
-  2) py agents/_test_smoke.py   ← 이 파일. work_guide/notify_draft 통합 확인
+  2) set D_PROVIDER_MODE=legacy
+  3) py agents/_test_smoke.py   ← 이 파일. work_guide 통합 확인
 
 S7 테스트 케이스 ①(경과일 12일 + 후반부 위험 예보 → 더 이른 창으로 앞당김)을
 재현하기 위해 DEMO_FARM 의 저장 경과일을 12일로 강제 세팅한다.
@@ -17,7 +18,7 @@ from datetime import datetime, timedelta
 from console import use_utf8_stdout
 from config import DEMO_FARM, section
 from serving import db
-from agents import work_guide, notify_draft
+from agents import work_guide
 
 use_utf8_stdout()
 
@@ -34,15 +35,7 @@ print(f"farm_config 갱신: last_manure_removal_date={DEMO_FARM['last_manure_rem
 # ── work_guide 4개 작업유형 전부 확인 ──────────────────────────────
 for wt in ("분뇨제거", "청소", "환기점검", "저감시설점검"):
     section(f"[work_guide] {wt}")
-    try:
-        print(work_guide.run(DEMO_FARM["farm_id"], wt))
-    except Exception as exc:
-        print(f"[에러] {wt}: {exc!r}")
-
-# ── notify_draft 확인 ───────────────────────────────────────────
-section("[notify_draft]")
-try:
-    result = notify_draft.run("청소", datetime.now() + timedelta(hours=6))
+    result = work_guide.run(DEMO_FARM["farm_id"], wt)
+    if "부족합니다" in result or "사용할 수 없습니다" in result:
+        raise RuntimeError(f"{wt}: {result}")
     print(result)
-except Exception as exc:
-    print(f"[에러] notify_draft: {exc!r}")

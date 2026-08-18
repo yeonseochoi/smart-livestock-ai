@@ -85,19 +85,3 @@ class GuideCard:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-@dataclass(frozen=True)
-class NotificationDraft:
-    farm_id: str
-    work_type: str
-    work_window: dict[str, Any]
-    audience_count: int
-    audience_is_mock: bool
-    plume_status: Literal["unverified", "unavailable"]
-    message: str
-    approved: bool = False
-    sent: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
