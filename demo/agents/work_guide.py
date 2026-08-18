@@ -1,84 +1,251 @@
-"""S7 — 작업 가이드 에이전트.
+"""D 작업 가이드 에이전트.
 
-ANTHROPIC_API_KEY 가 있으면 Claude tool use, 없으면 같은 도구를 규칙 기반으로
-호출하는 오프라인 폴백. 출력 형식은 계획서 고정:
-  추천 창 / 대안 창 / 작업 전·후 조치 / 판단 근거(문헌 + "익산 6년 실측" 인용)
-
-테스트 케이스 ①: 경과일 12일 + 후반부 위험 예보 → 더 이른 저위험 창으로
-앞당기고 근거 2개 이상 제시.
+provider 도구 결과로 추천·회피 창을 결정론적으로 확정한다. Gemini는 선택적으로
+그 결과를 설명할 뿐 시간, 점수와 등급을 만들거나 변경하지 않는다.
 """
 from __future__ import annotations
 
-import os
+from datetime import datetime, timedelta
+from typing import Any
 
 from config import PROV
-from agents.tools_schema import LocalTools, TOOLS
 
-SYSTEM = (
-    "너는 양돈농가 작업 가이드다. 반드시 도구를 호출해 근거를 수집하고 "
-    "출력은 '추천 창/대안 창/작업 전·후 조치/판단 근거' 4개 절로 고정한다. "
-    "판단 근거에는 문헌·법령과 '익산 6년 실측' 통계를 함께 인용한다."
-)
+from agents.contracts import GuideCard, WorkWindow
+from agents.provider import DecisionProvider, create_provider
+from agents.scoring_policy import TIME_WEIGHTS, WORK_WEIGHT, storage_factor
+from agents.tools_schema import AgentTools
 
 
-def _offline_guide(tools: LocalTools, farm_id: str, work_type: str) -> str:
-    cal = tools.get_risk_calendar(farm_id, days=3, work_type=work_type)
-    storage = tools.get_storage_days(farm_id)
-    rag = tools.search_rag(f"{work_type} 관리 기준", query_type=work_type
-                           if work_type in ("분뇨제거", "청소", "환기점검", "저감시설점검")
-                           else None)
-    if not cal:
-        return "risk_calendar 가 비어 있습니다. run_serve.py 를 먼저 실행하세요."
+_GRADE_ORDER = {"낮음": 0, "주의": 1, "위험": 2}
 
-    ranked = sorted(cal, key=lambda c: c["final"])  # 동률이면 이른 시각(정렬 안정성)
-    best, alt = ranked[0], (ranked[1] if len(ranked) > 1 else ranked[0])
 
-    # 플룸은 미검증 모델(S8-4) — 등급·순위에 반영하지 않고 참고로만 표시
-    plume_line = None
-    try:
-        from datetime import datetime as _dt
-        when = _dt.strptime(best["t"], "%Y-%m-%d %H시").strftime("%Y-%m-%d %H:%M")
-        plume = tools.get_plume_assessment(farm_id, when)
-        if "n_exposed" in plume:
-            plume_line = (f"  - 참고: 추천 창 풍하측 민가 {plume['n_exposed']}동 "
-                          f"(플룸 모델 — 미검증, 등급 미반영)")
-    except Exception:
-        pass
+def _build_windows(
+    calendar_items: list[dict[str, Any]], work_type: str, storage_days: int | None
+) -> list[WorkWindow]:
+    """연속된 1시간 위험값 6개에 시간 가중치를 직접 적용한다.
 
-    src = (f"{rag['results'][0]['doc']} {rag['results'][0]['unit']}"
-           if rag.get("results") else "법령·매뉴얼 검색 결과 없음")
+    일 단위 중기예보는 시간 추천 후보에서 제외한다. 존재하지 않는 시간 정밀도를
+    화면에서 만들어내지 않기 위한 제한이다.
+    """
 
-    lines = [
-        f"[추천 창] {best['t']} (final {best['final']}, 등급 {best['grade']})",
-        f"[대안 창] {alt['t']} (final {alt['final']}, 등급 {alt['grade']})",
-        "[작업 전·후 조치]",
-        "  - 작업 전: 인근 주민 알림 초안 승인, 저감시설 약액 확인",
-        "  - 작업 후: 살포지 즉시 경운(액비의 경우 배출 38% 감소), 시설 세척",
-        "[판단 근거]",
-        f"  - 익산 6년 실측(2020~2026): 야간·무풍·고습 블록의 민원율이 그 외 대비 유의하게 높음",
-        f"  - {src}",
+    hourly = [
+        item for item in calendar_items
+        if item.get("resolution") == "1h" and item.get("start")
     ]
-    if plume_line:
-        lines.append(plume_line)
-    if storage.get("days") is not None:
-        if storage["over_2weeks"]:
-            lines.append(f"  - 분뇨 저장 {storage['days']}일 경과 — 2주 임계 초과, 즉시성 가중(x1.5)")
-        else:
-            lines.append(
-                f"  - 분뇨 저장 {storage['days']}일 — 임계까지 {storage['days_until_threshold']}일. "
-                f"위험 예보 전 조기 작업 권고(앞당김)")
+    hourly.sort(key=lambda item: item["start"])
+    work_factor = WORK_WEIGHT.get(work_type, 1.0)
+    storage_weight = storage_factor(storage_days)
+    windows: list[WorkWindow] = []
+
+    for index in range(max(0, len(hourly) - len(TIME_WEIGHTS) + 1)):
+        segment = hourly[index:index + len(TIME_WEIGHTS)]
+        starts = [datetime.fromisoformat(item["start"]) for item in segment]
+        if any(
+            following - current != timedelta(hours=1)
+            for current, following in zip(starts, starts[1:])
+        ):
+            continue
+        risk = sum(
+            float(item["risk_score"]) * weight
+            for item, weight in zip(segment, TIME_WEIGHTS)
+        )
+        grade = max(
+            (item.get("risk_grade", "낮음") for item in segment),
+            key=lambda item: _GRADE_ORDER.get(item, 0),
+        )
+        reasons = [
+            "연속 6시간 전체에 1시간 단위 예측값이 존재",
+            f"B 민원 위험지수의 6시간 가중평균 {risk:.3f}",
+            f"작업유형 가중치 {work_factor:.2f} 적용 [C]",
+        ]
+        if storage_days is not None:
+            reasons.append(
+                f"저장 {storage_days}일, 저장 가중치 {storage_weight:.2f} 적용 [C]"
+            )
+        start = starts[0]
+        windows.append(WorkWindow(
+            start=start.isoformat(),
+            end=(start + timedelta(hours=6)).isoformat(),
+            window_risk=round(risk, 4),
+            recommendation_score=round(risk * work_factor * storage_weight, 4),
+            grade=grade,
+            reasons=tuple(reasons),
+        ))
+    return windows
+
+
+def plan_work(
+    provider: DecisionProvider,
+    farm_id: str,
+    work_type: str,
+    *,
+    days: int = 3,
+) -> GuideCard:
+    """내부 도구를 호출해 추천 Top 3와 회피 Top 3를 확정한다."""
+
+    tools = AgentTools(provider)
+    farm = tools.get_farm_config(farm_id)
+    calendar = tools.get_risk_calendar(farm_id, days, work_type)
+    storage = tools.get_storage_days(farm_id)
+    rag = tools.search_rag(f"{work_type} 작업 전후 관리 기준", work_type)
+    if calendar.get("status") != "ok":
+        raise RuntimeError(calendar.get("error") or "위험 캘린더를 사용할 수 없습니다")
+
+    storage_days = None
+    if storage.get("status") == "ok":
+        storage_days = (storage.get("data") or {}).get("days")
+    windows = _build_windows(
+        (calendar.get("data") or {}).get("items", []), work_type, storage_days
+    )
+    if len(windows) < 6:
+        raise RuntimeError("추천 Top 3/회피 Top 3를 만들 1시간 위험 구간이 부족합니다")
+
+    recommended = tuple(sorted(
+        windows, key=lambda item: (item.recommendation_score, item.start)
+    )[:3])
+    avoid = tuple(sorted(
+        windows,
+        key=lambda item: (item.recommendation_score, item.start),
+        reverse=True,
+    )[:3])
+
+    rag_data = rag.get("data") or {}
+    evidence = tuple(rag_data.get("results") or [])
+    sources = {
+        "farm": farm.get("source"),
+        "risk_calendar": calendar.get("source"),
+        "storage": storage.get("source"),
+        "rag": rag.get("source"),
+    }
+    fixture_names = [
+        name for name, source in sources.items()
+        if (source or {}).get("state") == "fixture"
+    ]
+    unavailable_names = [
+        name for name, source in sources.items()
+        if not source or source.get("state") == "unavailable"
+    ]
+    assumptions = [
+        "작업유형 가중치와 저장 14일 이후 1.5배는 팀 확정 전 잠정값 [C]",
+        "추천 순위는 B 위험값과 기존 S5 가중식으로 코드가 계산",
+    ]
+    limitations = [
+        "민원 발생 또는 감소를 보장하지 않고 상대 위험 회피만 지원",
+    ]
+    if fixture_names:
+        assumptions.append("FIXTURE 포함: " + ", ".join(sorted(fixture_names)))
+        limitations.insert(0, "공식 정보공개 자료 반영 전 구조 검증용 결과 포함")
+    if unavailable_names:
+        limitations.append("사용 불가 provider: " + ", ".join(sorted(unavailable_names)))
+    if rag.get("status") == "refused":
+        limitations.append("개별 법률 판단 요청으로 C 검색이 거절됨")
+    elif not evidence:
+        limitations.append("C 근거 검색 결과가 없어 작업 전 공식 원문 확인 필요")
+
+    return GuideCard(
+        farm_id=farm_id,
+        work_type=work_type,
+        recommended=recommended,
+        avoid=avoid,
+        before_actions=(
+            "저감시설과 세척 설비의 작동 상태를 확인합니다.",
+            "선택 시간의 최신 예보·데이터 갱신 상태를 다시 확인합니다.",
+        ),
+        after_actions=(
+            "작업 장소와 이동 경로를 세척합니다.",
+            "냄새·민원 발생 여부와 작업 결과를 기록합니다.",
+            "문제가 있으면 원인을 남겨 다음 계획 검토에 활용합니다.",
+        ),
+        evidence=evidence,
+        assumptions=tuple(assumptions),
+        limitations=tuple(limitations),
+        source_statuses=sources,
+    )
+
+
+def rule_based_summary(guide: GuideCard | dict[str, Any]) -> str:
+    data = guide.to_dict() if isinstance(guide, GuideCard) else guide
+    best, alternative = data["recommended"][:2]
+    return (
+        f"추천 창은 {_pretty_window(best)}이며 대안은 "
+        f"{_pretty_window(alternative)}입니다. 두 창 모두 6시간 전체를 비교한 "
+        "상대 민원 위험 회피 결과입니다. 실제 작업 전 최신 예보와 농장 상황을 "
+        "다시 확인해야 합니다."
+    )
+
+
+def format_guide(guide: GuideCard | dict[str, Any]) -> str:
+    """확정된 계획을 LLM 없이도 읽을 수 있는 문자열로 반환한다."""
+
+    data = guide.to_dict() if isinstance(guide, GuideCard) else guide
+    lines = ["[추천 창]"]
+    for index, item in enumerate(data["recommended"], 1):
+        lines.append(
+            f"  {index}. {_pretty_window(item)} score {item['recommendation_score']}"
+        )
+    lines.append("[회피 창]")
+    for index, item in enumerate(data["avoid"], 1):
+        lines.append(
+            f"  {index}. {_pretty_window(item)} score {item['recommendation_score']}"
+        )
+    lines.append("[작업 전·후 조치]")
+    lines.extend(f"  - 작업 전: {item}" for item in data["before_actions"])
+    lines.extend(f"  - 작업 후: {item}" for item in data["after_actions"])
+    lines.append("[판단 근거]")
+    if data["evidence"]:
+        for item in data["evidence"][:3]:
+            page_value = item.get("page")
+            page = f" p.{page_value}" if page_value is not None else " (쪽수 미확인)"
+            source_file = item.get("source_file") or item.get("doc") or "출처 미확인"
+            unit = item.get("unit") or "단원 미확인"
+            lines.append(f"  - {source_file} · {unit}{page}")
+    else:
+        lines.append("  - 법령·매뉴얼 검색 결과 없음: 공식 원문 확인 필요")
+    lines.extend(f"  - 한계: {item}" for item in data["limitations"])
     return "\n".join(lines)
 
 
-def run(farm_id: str, work_type: str, rag_index=None) -> str:
-    tools = LocalTools(rag_index)
-    if os.environ.get("ANTHROPIC_API_KEY"):
+def run(farm_id: str, work_type: str, rag_index: Any = None) -> str:
+    """기존 콘솔 진입점. 확정 계획 뒤에만 선택적 Gemini 설명을 붙인다."""
+
+    try:
+        provider = create_provider(rag_index=rag_index)
+        guide = plan_work(provider, farm_id, work_type)
+    except (RuntimeError, ValueError) as exc:
+        return str(exc)
+
+    canonical = format_guide(guide)
+    from agents.gemini_explainer import GEMINI_MODEL, compose, is_configured
+
+    if is_configured():
         try:
-            import anthropic  # noqa: F401
-            PROV.log("S7 작업가이드 LLM", "Claude API (tool use)", real=True)
-            # 실 API 루프는 tools_schema.TOOLS 로 구성 (데모 환경에서는 미실행 경로)
-        except ImportError:
-            pass
-    PROV.log("S7 작업가이드", "오프라인 규칙 폴백", real=False,
-             note="ANTHROPIC_API_KEY 미설정 — 도구 6종은 동일 사용")
-    return _offline_guide(tools, farm_id, work_type)
+            explanation = compose(guide)
+        except Exception as exc:
+            PROV.log(
+                "S7 작업가이드",
+                "Gemini API 호출 실패 — 확정 계획 유지",
+                real=False,
+                note=str(exc),
+            )
+        else:
+            if explanation:
+                PROV.log(
+                    "S7 작업가이드 LLM",
+                    f"Gemini 설명 생성 ({GEMINI_MODEL})",
+                    real=True,
+                )
+                return canonical + "\n\n[AI 설명]\n" + explanation
+
+    PROV.log(
+        "S7 작업가이드",
+        "agents/work_guide.py 결정론적 오케스트레이션",
+        real=False,
+        note="Gemini 없이도 동일 추천 결과",
+    )
+    return canonical
+
+
+def _pretty_window(window: dict[str, Any]) -> str:
+    start = datetime.fromisoformat(window["start"])
+    end = datetime.fromisoformat(window["end"])
+    return f"{start:%m월 %d일 %H시}~{end:%H시}({window['grade']})"

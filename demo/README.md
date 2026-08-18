@@ -62,8 +62,9 @@ python archive/demo_v2.py ~ demo_v5.py   # 과거 검증 라운드 재현
 python run_train_region.py          # 지역 격자 병행 트랙 (실험)
 ```
 
-API 키는 전부 선택사항: `KMA_KEY`(단기·중기예보), `VWORLD_KEY`(주거건물),
-`ANTHROPIC_API_KEY`(에이전트 LLM)가 없으면 mock 폴백으로 돌고 콘솔에 로깅된다.
+API 키는 전부 선택사항이다. 기존 파이프라인은 `KMA_KEY`(단기·중기예보)와
+`VWORLD_KEY`(주거건물)를 사용한다. D의 설명 생성은 `GOOGLE_API_KEY`가 있을 때만
+활성화되며, 없어도 코드가 확정한 작업 가이드는 끝까지 실행된다.
 
 > `KMA_KEY` 는 **설정하지 말 것.** `serving/kma_midterm.py` 의 `_service_key()` 가
 > 환경변수 경로에만 `unquote()` 가 없어서, 설정하면 이중 인코딩으로 중기예보가
@@ -93,8 +94,36 @@ Direct connection 은 무료 티어에서 IPv6 전용이라 Actions 러너에서
 | --- | --- | --- | --- |
 | **A** | 데이터·모델 | `preprocess/`(clean_data → build_grid → build_features/spatial_features) → `model/train_model.py` | `python run_train.py`. 모델 실험은 `model/train_model.py` 하이퍼파라미터 + `preprocess/build_features.py` 피처 리스트 수정 |
 | **B** | 운영 배관 | `serving/` — db.py(PostgreSQL/SQLite 이중 백엔드), daily_scoring.py(예보→확률→등급→upsert), kma_midterm.py(중기예보), scheduler.py | `python run_serve.py` / `python -m serving.scheduler --once` |
-| **C** | RAG | `rag/` — ingest.py(조문 청킹+위계 메타), search.py(ko-sroberta+위계 부스트), eval_qa_v2.py(30문항) | 평가 재실행: `python archive/demo_v3.py` 의 v3-12 구간. 시행령 별표 원문(DOC) 도착 시 `python -m rag.reingest_annex <파일.docx>` |
-| **D** | 에이전트 | `agents/` — work_guide.py(작업 가이드), notify_draft.py(주민 알림), tools_schema.py(도구 6종 스키마) | `archive/demo.py` ⑥ 구간. ANTHROPIC_API_KEY 설정 시 Claude tool use 로 전환되는 구조 |
+| **C** | RAG | `rag_yujin/` — manual/law 분리 검색, Chroma DB, 선택적 Gemini 답변과 RAGAS PoC | `_1_loader.py` → `_2_Chunking.py` → `_3_embedding.py` → `_4_database.py` → `_5_search.py` |
+| **D** | 작업 가이드 에이전트 | `agents/` — provider adapter, 1시간 위험 기반 6시간 작업 계획, PR #9 RAG 근거, 선택적 Gemini 설명 | `python agents/_test_smoke.py` / `streamlit run app/dashboard.py` |
+
+### D 파트 구조와 실행
+
+D의 중심은 `agents/`다. 추천 시간과 점수는 코드가 확정하고 Gemini는 설명만 작성한다.
+
+- `provider.py`: A/B/C와 익산 측정소 자료가 지켜야 할 교체 가능한 인터페이스
+- `scoring_policy.py`: 기존 S5의 시간·작업·저장일 가중치를 분리한 순수 정책
+- `fixture_provider.py`: 공식 자료 도착 전임을 명시하는 고정 시연 데이터
+- `legacy_provider.py`: `serving.db`의 `risk_hourly`와 PR #9 RAG를 새 계약으로 연결
+- `rag_adapter.py`: `rag_yujin` 검색 문서를 구조화된 출처 메타데이터로 변환
+- `work_guide.py`: 1시간 위험값 6개로 추천 Top 3·회피 Top 3를 결정론적으로 계산
+- `gemini_explainer.py`: 확정된 결과를 바꾸지 않고 선택적으로 설명만 생성
+
+`app/dashboard.py`에는 모델·추천·RAG 로직을 두지 않는다. Streamlit의 화면 표시와
+세션 상태만 담당하므로, 실제 자료가 바뀌어도 `agents`의 provider만 교체하면 된다.
+
+```powershell
+cd demo
+pip install -r requirements-d.txt
+streamlit run app/dashboard.py
+```
+
+기본값은 current main의 DB와 RAG를 연결하는 `D_PROVIDER_MODE=legacy`다. 고정된
+구조 검증 데이터만 사용할 때 `D_PROVIDER_MODE=fixture`를 명시한다. 실제 adapter는
+`D_PROVIDER_FACTORY=package.module:create_provider`로 주입하며, 연결 실패를
+fixture로 조용히 바꾸지 않는다. 외부 factory는 `storage_days`와 `rag_index`
+키워드 인자를 받고 `DecisionProvider` 구현을 반환해야 한다. 상세 설계 근거는
+`docs/D_ARCHITECTURE.md`에 있다.
 
 공용 분석: `analysis/` (figures 그래프 6종, v2~v5 실험, plume_validation 다중 발원 하네스).
 발표 그래프는 `out/figs/` (captions.md 에 한 줄 캡션).

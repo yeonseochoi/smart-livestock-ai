@@ -1,0 +1,5 @@
+# D 에이전트 Streamlit 시연의 추가 의존성. A/B/C 전체 의존성은 requirements.txt.
+# PR #9 RAG와 Gemini 설명기가 검증한 동일 버전을 사용한다.
+-r rag_yujin/requirements.txt
+streamlit>=1.51,<2
+pydeck>=0.9,<1
