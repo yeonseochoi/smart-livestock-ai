@@ -211,7 +211,7 @@ class LegacyProvider:
             except Exception as exc:
                 return self._response(
                     "unavailable", None,
-                    self._source("unavailable", "PR #9 rag_yujin Chroma"),
+                    self._source("unavailable", "C RAG (rag_yujin)"),
                     f"RAG 인덱스를 열 수 없습니다: {type(exc).__name__}: {exc}",
                 )
         try:
@@ -219,7 +219,7 @@ class LegacyProvider:
         except Exception as exc:
             return self._response(
                 "unavailable", None,
-                self._source("unavailable", "PR #9 rag_yujin Chroma"),
+                self._source("unavailable", "C RAG (rag_yujin)"),
                 f"RAG 검색 실패: {type(exc).__name__}: {exc}",
             )
         status = "refused" if data.get("refused") else "ok"
