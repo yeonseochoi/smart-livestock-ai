@@ -1,0 +1,13 @@
+# Streamlit Cloud / 로컬 공통 설정.
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#1F6E7E"
+backgroundColor = "#F4F6F7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#141E25"

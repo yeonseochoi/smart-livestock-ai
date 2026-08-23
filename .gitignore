@@ -17,3 +17,10 @@ demo/rag_yujin/data/chroma_db/
 *.db
 *.parquet
 *.pkl
+
+# ── 재생성물 — 커밋하지 않는다 (2026-08-23) ──
+demo/data/*.json
+demo/data/*.csv
+!demo/data/geocode_cache.json
+out_agent_capture.json
+에이전트_출력_예시.html

@@ -1,0 +1,10 @@
+# ⚠️ 이 파일은 Streamlit Cloud 배포 전용입니다.
+#
+#    개발할 때는 이걸 쓰지 마세요. 아래를 쓰세요:
+#        pip install -r demo/requirements.txt      (A/B 학습·서빙)
+#        pip install -r demo/requirements-d.txt    (C/D RAG·대시보드)
+#
+#    Streamlit Cloud 는 저장소 루트의 requirements.txt 만 자동으로 찾기 때문에
+#    이 위치에 둘 수밖에 없습니다. 실제 목록은 아래 파일에 있습니다.
+
+-r demo/requirements-deploy.txt

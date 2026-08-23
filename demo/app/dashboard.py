@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,18 @@ import streamlit as st
 DEMO_DIR = Path(__file__).resolve().parents[1]
 if str(DEMO_DIR) not in sys.path:
     sys.path.insert(0, str(DEMO_DIR))
+
+# ── Streamlit Cloud Secrets -> 환경변수 다리 ────────────────────────────
+# config.py 는 import 시점에 os.environ["DATABASE_URL"] 을 읽어 백엔드를 정한다.
+# 배포 환경에는 .env 파일이 없고 값이 st.secrets 로만 들어오므로, agents 를
+# import 하기 "전에" 환경변수로 옮겨 둔다. 이미 있는 값은 덮어쓰지 않는다
+# (로컬 .env 가 우선). 로컬처럼 secrets 가 없으면 조용히 건너뛴다.
+try:
+    for _key, _value in st.secrets.items():
+        if isinstance(_value, str) and _key not in os.environ:
+            os.environ[_key] = _value
+except Exception:
+    pass
 
 from agents.gemini_explainer import compose, is_configured
 from agents.provider import create_provider
