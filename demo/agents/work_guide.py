@@ -6,7 +6,7 @@ LLM은 이 결과를 바꾸지 않고 별도 모듈에서 설명만 작성한다
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config import PROV
@@ -20,9 +20,20 @@ from agents.tools_schema import AgentTools, LocalTools
 
 _GRADE_ORDER = {"낮음": 0, "주의": 1, "위험": 2}
 
+# 서버 시각이 아니라 한국 시각으로 "지금"을 판단한다.
+# Streamlit Cloud 컨테이너는 UTC 라서 datetime.now() 를 그냥 쓰면 9시간 어긋나고,
+# 그 결과 이미 지나간 오전 시각이 계속 추천 후보로 남는다.
+KST = timezone(timedelta(hours=9))
+
+
+def _as_kst(value: datetime) -> datetime:
+    """tz 정보가 없는 시각은 KST 로 본다. 비교에서 TypeError 가 나지 않게 한다."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=KST)
+
 
 def _build_windows(
-    calendar_items: list[dict[str, Any]], work_type: str, storage_days: int | None
+    calendar_items: list[dict[str, Any]], work_type: str, storage_days: int | None,
+    *, not_before: datetime | None = None,
 ) -> list[WorkWindow]:
     """1시간 단위 예측값 6개를 이어 붙여 연속 6시간 창을 만든다.
 
@@ -47,9 +58,14 @@ def _build_windows(
 
     for i in range(len(hours) - len(TIME_WEIGHTS) + 1):
         block = hours[i:i + len(TIME_WEIGHTS)]
-        starts = [datetime.fromisoformat(item["start"]) for item in block]
+        starts = [_as_kst(datetime.fromisoformat(item["start"])) for item in block]
         # 6개가 정말 연속된 1시간 간격인지 확인한다 — 결측 시각이 있으면 창을 만들지 않는다.
         if any(b - a != timedelta(hours=1) for a, b in zip(starts, starts[1:])):
+            continue
+        # 이미 지나간 시각은 후보가 아니다. "내일 새벽 5시" 를 추천해 놓고
+        # 정작 그 시각이 어제였던 화면이 실제로 나온다 — DB 배치에 오늘 0시부터의
+        # 값이 들어 있고 사용자는 오후에 화면을 열기 때문이다.
+        if not_before is not None and starts[0] < _as_kst(not_before):
             continue
         risk = sum(float(item["risk_score"]) * weight
                    for item, weight in zip(block, TIME_WEIGHTS))
@@ -73,14 +89,28 @@ def _build_windows(
     return windows
 
 
+# plan_work(not_before=None) 은 "필터를 끈다"는 뜻이라 None 을 기본값으로 쓸 수 없다.
+# 기본값(지금 시각 적용)과 명시적 해제를 구분하는 표식이다.
+_USE_NOW: Any = object()
+
+
 def plan_work(
     provider: DecisionProvider,
     farm_id: str,
     work_type: str,
     *,
     days: int = 3,
+    not_before: datetime | None = _USE_NOW,
 ) -> GuideCard:
-    """도구를 수집해 추천 Top 3와 회피 Top 3를 결정론적으로 반환한다."""
+    """도구를 수집해 추천 Top 3와 회피 Top 3를 결정론적으로 반환한다.
+
+    ``not_before`` 기본값은 "지금(KST)"이다. 이미 지나간 시각을 추천하지
+    않는다. ``None`` 을 명시하면 시간 필터를 끄고 예전처럼 전 구간을 본다
+    (과거 배치 재현·회귀 점검용).
+    """
+
+    if not_before is _USE_NOW:
+        not_before = datetime.now(KST)
 
     tools = AgentTools(provider)
     calendar = tools.get_risk_calendar(farm_id, days, work_type)
@@ -92,8 +122,22 @@ def plan_work(
     storage_days = None
     if storage.get("status") == "ok":
         storage_days = (storage.get("data") or {}).get("days")
-    windows = _build_windows((calendar.get("data") or {}).get("items", []),
-                             work_type, storage_days)
+    items = (calendar.get("data") or {}).get("items", [])
+    windows = _build_windows(items, work_type, storage_days, not_before=not_before)
+
+    # 예보 배치가 오래되면 "앞으로 남은 시각"이 하나도 없을 수 있다. 이때 화면을
+    # 죽이는 대신 필터를 풀어 계속 보여 주되, 지난 시각이 섞였다는 사실을 한계로
+    # 남긴다 — 폴백을 탔다는 사실은 반드시 표시한다는 이 저장소의 규약이다.
+    stale_note: str | None = None
+    if len(windows) < 6 and not_before is not None:
+        unfiltered = _build_windows(items, work_type, storage_days)
+        if len(unfiltered) >= 6:
+            windows = unfiltered
+            stale_note = (
+                "예보 배치가 오래되어 앞으로 남은 6시간 창이 없습니다. "
+                "이미 지난 시각을 포함해 표시했으므로 serving.daily_scoring.run() "
+                "재실행이 필요합니다"
+            )
     if len(windows) < 6:
         raise RuntimeError("추천 Top 3/회피 Top 3를 만들 6시간 창이 부족합니다")
 
@@ -120,10 +164,16 @@ def plan_work(
         "작업유형 가중치와 저장 14일 이후 1.5배는 팀 확정 전 잠정값 [C]",
         "추천 순위는 B 위험값과 기존 S5 가중식으로 코드가 계산",
     ]
+    if not_before is not None:
+        assumptions.append(
+            f"{_as_kst(not_before):%m월 %d일 %H시} 이후 시작하는 창만 후보"
+        )
     limitations = [
         "민원 발생 또는 감소를 보장하지 않고 상대 위험 회피만 지원",
         "플룸은 추천 점수와 등급에 반영하지 않음",
     ]
+    if stale_note:
+        limitations.insert(0, stale_note)
     if fixture_names:
         assumptions.append("FIXTURE 포함: " + ", ".join(sorted(fixture_names)))
         limitations.insert(0, "공식 정보공개 자료 반영 전 구조 검증용 결과 포함")

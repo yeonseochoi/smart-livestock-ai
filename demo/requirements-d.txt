@@ -3,3 +3,10 @@
 -r rag_yujin/requirements.txt
 streamlit>=1.51,<2
 pydeck>=0.9,<1
+
+# 위치 입력·지도 (app/location_ui.py). 버전은 2026-08-25 실제 설치 확인분으로 핀 고정.
+#   pydeck 은 임의 지점의 클릭 좌표를 돌려주지 못해 입력 위젯이 될 수 없다.
+#   기존 측정소 지도(pydeck)는 그대로 두고, 위치 입력용 지도만 folium 을 쓴다.
+folium==0.20.0
+streamlit-folium==0.26.2
+streamlit-geolocation==0.0.10

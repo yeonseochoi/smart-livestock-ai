@@ -37,3 +37,21 @@ psycopg[binary]==3.3.4
 # Gemini 설명 생성. 키가 없으면 규칙 기반 설명으로 자동 대체된다.
 langchain-core==1.5.5
 langchain-google-genai==4.3.4
+
+# 위치 입력·지도 (app/location_ui.py).
+# 실측 7.4MB (folium 0.9 + streamlit-folium 2.4 + streamlit-geolocation 3.0
+#             + branca 0.2 + xyzservices 0.9). 1GB 메모리 제한에 영향 없다.
+#
+#   ⚠️ 배포 서버는 모델을 돌리지 않고 risk_hourly 를 읽기만 한다는 위 전제는
+#      그대로다. 사용자 좌표로 예보를 다시 받아 오지 않으며, 좌표는
+#      ① 풍하측 수용점 유형 선택과 ② 지도 표시에만 쓴다. 기상청 격자는
+#      익산 고정이다 — 익산 안에서 5km 격자는 어차피 거의 바뀌지 않는다.
+#
+#   navigator.geolocation 은 HTTPS 에서만 동작한다. Streamlit Cloud 는 HTTPS라
+#   문제없고, 로컬 테스트는 localhost 로 해야 한다.
+folium==0.20.0
+streamlit-folium==0.26.2
+streamlit-geolocation==0.0.10
+
+# VWORLD 주소 검색(선택). VWORLD_KEY 가 없으면 지도 클릭·GPS 만 쓴다.
+requests>=2.31,<3

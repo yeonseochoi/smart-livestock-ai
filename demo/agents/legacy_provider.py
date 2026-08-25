@@ -30,13 +30,23 @@ _GRADE_ORDER = {"낮음": 0, "주의": 1, "위험": 2}
 
 
 class LegacyProvider:
-    def __init__(self, *, rag_index: Any = None, storage_days: int | None = None) -> None:
+    def __init__(self, *, rag_index: Any = None, storage_days: int | None = None,
+                 farm_override: dict[str, Any] | None = None) -> None:
         self.rag = rag_index
         self.generated_at = datetime.now(KST).isoformat(timespec="seconds")
         # 화면 사이드바의 「분뇨 저장 경과일」 값이다. 여기 담아 두지 않으면
         # get_storage_days() 가 참조할 곳이 없어 슬라이더가 무동작이 된다
         # (아래 메서드 주석 참조). fixture_provider 는 처음부터 이렇게 하고 있다.
         self.storage_days = storage_days
+        # 사용자가 화면에서 정한 농장 좌표. 세션 메모리에만 있고 DB 에 쓰지 않는다.
+        #
+        # ★ DB 에 쓰지 않는 이유가 있다. 프리뷰 앱과 라이브 앱이 같은 Supabase 를
+        #   읽으므로, 여기서 farm_config 를 UPDATE 하면 남의 화면이 같이 바뀐다.
+        #   위치는 "이 브라우저 세션의 입력값"이지 저장할 설비 정보가 아니다.
+        #
+        # None 이면 지금까지와 완전히 같이 동작한다 — 위치를 정하지 않은 사용자의
+        # 화면이 달라지면 안 된다.
+        self.farm_override = farm_override or None
 
     def _source(
         self, state: str, name: str, *limitations: str, version: str | None = None
@@ -93,12 +103,18 @@ class LegacyProvider:
         """
         observed = datetime.now(KST).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
         ingested = observed + timedelta(minutes=5)
+        # [C] 2026-08-25: 좌표를 지명과 맞췄다. 이전 값(왕궁 35.9518, 126.9574)은
+        #     config.WANGGUNG(35.968937, 127.090910)에서 약 12km 서쪽이라,
+        #     같은 지도에 수용점·사용자 위치를 함께 올리는 순간 "왕궁 측정소인데
+        #     왜 왕궁에서 12km 떨어져 있나"가 눈에 보인다. 값 자체는 여전히
+        #     발표용 고정값이며(state="fixture"), 지도에서도 회색 점선으로
+        #     "(예시)" 표시해 실측 레이어와 구분한다.
         raw = (
-            ("S-DEMO-01", "익산 왕궁 측정소(예시)", 35.9518, 126.9574,
+            ("S-DEMO-01", "익산 왕궁 측정소(예시)", 35.9645, 127.0862,
              0.001, 0.002, 0.191, 1.8, 30.7, 58.9, "동남동", 2.2, "unverified"),
-            ("S-DEMO-02", "익산 춘포 측정소(예시)", 35.9587, 126.9880,
+            ("S-DEMO-02", "익산 춘포 측정소(예시)", 35.9430, 127.0350,
              0.002, 0.004, 0.224, 2.1, 30.2, 61.4, "남동", 1.7, "unverified"),
-            ("S-DEMO-03", "익산 삼기 측정소(예시)", 35.9460, 127.0140,
+            ("S-DEMO-03", "익산 삼기 측정소(예시)", 35.9930, 127.0180,
              None, None, None, None, 29.8, 60.1, "동남동", 2.4, "missing"),
         )
         stations = []
@@ -169,15 +185,29 @@ class LegacyProvider:
                 "실행하세요 (옛 risk_calendar는 현행 파이프라인이 더는 채우지 않습니다).",
             )
 
-        # 그룹(농촌근거리/시가지원거리) 중 시간별 위험도가 높은 행을 선택한다.
-        # 두 확률을 곱하지 않는 현행 advisor의 보수적 max 원칙과 같다.
-        by_hour: dict[tuple[str, int], tuple[Any, ...]] = {}
+        # ── 어느 수용점 유형의 점수를 볼 것인가 ────────────────────────
+        # 기본(위치 미설정)은 지금까지와 같이 두 유형 중 최댓값이다.
+        # 두 확률을 곱하지 않는 현행 advisor 의 보수적 max 원칙과 같다.
+        #
+        # 사용자가 위치를 정했을 때만 플룸이 개입한다. 이때도 점수를 바꾸지
+        # 않고 '어느 유형을 볼지'만 고른다 — 절대규칙 1. 로직은 새로 짜지 않고
+        # advisor/recommend.py 가 쓰는 downwind_groups 를 그대로 재사용한다.
+        wind = self._load_wind() if self.farm_override else {}
+        plume_hits = 0
+        by_group: dict[tuple[str, int], dict[str, tuple[Any, ...]]] = {}
         for row in rows:
-            date_value, hour, _grp, prob, grade, model_type, updated_at = row
-            key = (date_value, int(hour))
-            current = by_hour.get(key)
-            if current is None or float(prob) > float(current[3]):
-                by_hour[key] = tuple(row)
+            date_value, hour, grp, *_rest = row
+            by_group.setdefault((date_value, int(hour)), {})[grp] = tuple(row)
+
+        by_hour: dict[tuple[str, int], tuple[Any, ...]] = {}
+        for key, per_group in by_group.items():
+            picked = per_group
+            if wind:
+                selected = self._downwind_subset(key, per_group, wind)
+                if selected:
+                    picked = selected
+                    plume_hits += 1
+            by_hour[key] = max(picked.values(), key=lambda r: float(r[3]))
 
         dates = sorted({date_value for date_value, _ in by_hour})[
             : max(1, min(int(days), 7))
@@ -214,12 +244,111 @@ class LegacyProvider:
                     "model_type": day_rows[0][5], "model_version": None,
                     "forecast_issued_at": day_rows[0][6], "valid_at": date_text,
                 })
+        limitations = ["가장 최근 updated_at 배치만 사용"]
+        if plume_hits:
+            limitations.append(
+                f"사용자 위치 기준 풍하측 수용점 유형을 {plume_hits}개 시각에서 선택 "
+                "(플룸은 유형 선택에만 쓰고 점수·등급은 바꾸지 않음)"
+            )
+        elif self.farm_override:
+            limitations.append(
+                "사용자 위치를 받았으나 풍하측에 드는 수용점 유형이 없어 "
+                "두 유형의 최댓값을 그대로 사용"
+            )
+        else:
+            limitations.append(
+                "그룹(농촌근거리/시가지원거리) 중 보수적으로 위험도가 더 높은 쪽 채택"
+            )
+        limitations.append("단기는 1시간, reduced 중기는 일 단위로 제공")
         return self._response(
-            "ok", {"farm_id": farm_id, "work_type": work_type, "items": items},
-            self._source("connected", f"B risk_hourly · {db.describe()}",
-                         "가장 최근 updated_at 배치만 사용",
-                         "그룹(농촌근거리/시가지원거리) 중 보수적으로 위험도가 더 높은 쪽 채택",
-                         "단기는 1시간, reduced 중기는 일 단위로 제공"),
+            "ok", {"farm_id": farm_id, "work_type": work_type, "items": items,
+                   "plume_selected_hours": plume_hits},
+            self._source("connected", f"B risk_hourly · {db.describe()}", *limitations),
+        )
+
+    # ── 플룸 유형 선택 보조 ───────────────────────────────────────
+    def _load_wind(self) -> dict[tuple[str, int], dict[str, Any]]:
+        """{(날짜, 시각): {wd, ws, sky}} — daily_scoring 이 저장한 예보 원값.
+
+        advisor/recommend.py 의 _load_forecast_wind() 와 같은 자료를 읽는다.
+        비어 있어도 예외를 올리지 않는다 — 부채꼴을 못 그릴 뿐 캘린더는
+        지금까지와 똑같이 나와야 한다.
+        """
+        con = None
+        try:
+            con = db.connect()
+            rows = con.execute(
+                "SELECT date, hour, wd, ws, sky FROM forecast_hourly"
+            ).fetchall()
+        except Exception:
+            return {}
+        finally:
+            if con is not None:
+                con.close()
+        out: dict[tuple[str, int], dict[str, Any]] = {}
+        for date_text, hour, wd, ws, sky in rows:
+            if wd is None or ws is None:
+                continue
+            out[(date_text, int(hour))] = {"wd": float(wd), "ws": float(ws), "sky": sky}
+        return out
+
+    def _downwind_subset(
+        self, key: tuple[str, int], per_group: dict[str, tuple[Any, ...]],
+        wind: dict[tuple[str, int], dict[str, Any]],
+    ) -> dict[str, tuple[Any, ...]] | None:
+        """이 시각 풍하측에 드는 유형만 남긴다. 판정 불가면 None."""
+        weather = wind.get(key)
+        if not weather or not self.farm_override:
+            return None
+        from analysis.plume_select import downwind_groups
+
+        date_text, hour = key
+        when = datetime.strptime(date_text, "%Y-%m-%d").replace(hour=hour, tzinfo=KST)
+        try:
+            hit, _detail = downwind_groups(
+                float(self.farm_override["lat"]), float(self.farm_override["lon"]),
+                weather["wd"], weather["ws"], weather["sky"], when,
+            )
+        except Exception:
+            return None
+        selected = {g: row for g, row in per_group.items() if g in hit}
+        return selected or None
+
+    def get_wind_series(self, days: int = 3) -> dict[str, Any]:
+        """지도 부채꼴용 시각별 예보 원값. DecisionProvider 계약 밖의 선택 기능이다.
+
+        Protocol 에 넣지 않은 이유는 fixture provider 가 예보 원값을 갖고 있지
+        않기 때문이다. 화면은 ``getattr`` 로 있으면 쓰고 없으면 부채꼴만 생략한다.
+        """
+        wind = self._load_wind()
+        if not wind:
+            return self._response(
+                "unavailable", None,
+                self._source("unavailable", f"B forecast_hourly · {db.describe()}"),
+                "forecast_hourly 가 비어 있습니다. serving.daily_scoring.run() 을 먼저 실행하세요.",
+            )
+        # ★ forecast_hourly 는 PK 가 (date, hour) 라 실행할 때마다 덮어쓰이며 쌓인다.
+        #   그래서 테이블에는 지난주 예보가 그대로 남아 있다 (실측: 08-18 ~ 08-29).
+        #   그냥 sorted()[:3] 하면 일주일 전 날짜가 슬라이더에 뜨고, 화면의
+        #   추천 시각(모레)과 어긋나 보인다. 오늘 이후를 먼저 고르고, 그것이
+        #   없을 때만(=배치가 통째로 오래됐을 때) 가장 최근 날짜로 폴백한다.
+        span = max(1, min(int(days), 7))
+        all_dates = sorted({date_text for date_text, _ in wind})
+        today = datetime.now(KST).strftime("%Y-%m-%d")
+        upcoming = [d for d in all_dates if d >= today]
+        dates = upcoming[:span] if upcoming else all_dates[-span:]
+        items = [
+            {"date": date_text, "hour": hour,
+             "start": datetime.strptime(date_text, "%Y-%m-%d").replace(
+                 hour=hour, tzinfo=KST).isoformat(),
+             **wind[(date_text, hour)]}
+            for date_text, hour in sorted(wind)
+            if date_text in dates
+        ]
+        return self._response(
+            "ok", {"items": items},
+            self._source("connected", f"B forecast_hourly · {db.describe()}",
+                         "기상청 단기예보 원값이며 관측이 아님"),
         )
 
     def get_forecast(self, farm_id: str, days: int) -> dict[str, Any]:
@@ -366,8 +495,7 @@ class LegacyProvider:
                          "미검증 참고이며 등급·추천 순위에 미반영"),
         )
 
-    @staticmethod
-    def _farm_row(farm_id: str) -> dict[str, Any] | None:
+    def _farm_row(self, farm_id: str) -> dict[str, Any] | None:
         con = db.connect()
         try:
             row = con.execute(
@@ -381,4 +509,14 @@ class LegacyProvider:
             return None
         keys = ("farm_id", "name", "lat", "lon", "facility_type",
                 "last_manure_removal_date")
-        return dict(zip(keys, row))
+        farm = dict(zip(keys, row))
+        if self.farm_override:
+            # 좌표와 이름만 덮어쓴다. 저장 경과일·시설유형은 DB 값을 그대로 둔다
+            # — 사용자가 정한 것은 위치이지 농장의 나머지 속성이 아니다.
+            farm = dict(farm)
+            farm.update({
+                "lat": self.farm_override["lat"], "lon": self.farm_override["lon"],
+                "name": self.farm_override.get("name") or farm.get("name"),
+                "coordinate_source": self.farm_override.get("source"),
+            })
+        return farm
