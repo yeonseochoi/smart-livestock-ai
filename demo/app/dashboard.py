@@ -41,6 +41,7 @@ except Exception:
 from agents.gemini_explainer import compose, is_configured
 from agents.provider import create_provider
 from agents.work_guide import plan_work, rule_based_summary
+from app.location_ui import render_location_panel, render_location_sidebar
 
 
 WORK_TYPES = ("분뇨제거", "청소", "환기점검", "저감시설점검", "액비살포")
@@ -430,6 +431,8 @@ def main() -> None:
         if not is_configured():
             st.caption("GOOGLE_API_KEY가 설정되지 않아 규칙 기반 설명만 사용합니다.")
 
+        location = render_location_sidebar()
+
     st.markdown(
         '<div style="font-size:0.8rem;color:oklch(0.52 0.02 250);margin-bottom:2px;">'
         "익산시 축산환경 시연</div>",
@@ -443,7 +446,8 @@ def main() -> None:
     )
 
     try:
-        provider = create_provider(storage_days=storage_days)
+        provider = create_provider(storage_days=storage_days,
+                                   farm_override=location.as_farm_override())
     except Exception as exc:
         st.error(f"provider 생성 실패: {type(exc).__name__}: {exc}")
         return
@@ -494,6 +498,9 @@ def main() -> None:
         ["① 측정소 지도", "② 캘린더·작업계획", "③ RAG 근거", "④ 데이터·한계"]
     )
     with map_tab:
+        render_location_panel(location, provider=provider, snapshot=snapshot,
+                              use_basemap=use_basemap)
+        st.divider()
         st.subheader("현재·과거 측정소 관측")
         _source_caption(snapshot)
         _render_sensor_map(snapshot, use_basemap)

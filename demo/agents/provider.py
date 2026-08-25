@@ -43,17 +43,27 @@ def _load_factory(spec: str) -> ProviderFactory:
 
 
 def create_provider(
-    *, storage_days: int = 12, rag_index: Any = None
+    *, storage_days: int = 12, rag_index: Any = None,
+    farm_override: dict[str, Any] | None = None,
 ) -> DecisionProvider:
     """환경 설정에 맞는 provider를 반환한다.
 
     기본값은 current main의 ``serving.db``와 RAG를 연결하는 legacy adapter다.
     고정 구조 검증 데이터가 필요할 때만 ``D_PROVIDER_MODE=fixture``를 명시한다.
+
+    ``farm_override``는 화면에서 사용자가 정한 농장 좌표다. 값이 있을 때만
+    provider에 전달한다 — 기존 외부 factory는 ``storage_days``/``rag_index``
+    두 개만 받는 계약이라, 위치를 쓰지 않는 호출에서 시그니처를 깨지 않기
+    위해서다. ``fixture`` 모드는 고정 시연 데이터라 좌표를 반영하지 않는다.
     """
+
+    extra: dict[str, Any] = {"farm_override": farm_override} if farm_override else {}
 
     spec = os.getenv("D_PROVIDER_FACTORY", "").strip()
     if spec:
-        return _load_factory(spec)(storage_days=storage_days, rag_index=rag_index)
+        return _load_factory(spec)(
+            storage_days=storage_days, rag_index=rag_index, **extra
+        )
 
     mode = os.getenv("D_PROVIDER_MODE", "legacy").strip().lower()
     if mode == "fixture":
@@ -63,5 +73,7 @@ def create_provider(
     if mode == "legacy":
         from agents.legacy_provider import LegacyProvider
 
-        return LegacyProvider(rag_index=rag_index)
+        # storage_days 를 빠뜨리면 사이드바 「분뇨 저장 경과일」이 legacy 모드에서만
+        # 무동작이 된다 (바로 위 fixture 분기는 처음부터 넘기고 있었다).
+        return LegacyProvider(rag_index=rag_index, storage_days=storage_days, **extra)
     raise ValueError("D_PROVIDER_MODE는 fixture 또는 legacy여야 합니다.")
