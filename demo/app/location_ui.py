@@ -187,8 +187,13 @@ def render_location_panel(
 ) -> None:
     """탭 ① 맨 위에 내 농장 지도를 그린다. 실패해도 아래 기존 화면은 살아 있다."""
 
-    st.subheader("📍 내 농장 위치")
+    st.subheader(f"📍 {location.source_label}")
 
+    # [C] 2026-08-25 예전엔 오른쪽 「측정소 관측」 지도와 시작 높이를 맞추려고
+    # st.empty() 로 지도 자리를 미리 예약해 뒀었는데, "두 지도 비율은 안
+    # 맞춰도 되니까 위험도 판단 → 확인할 시각 → 지도 순으로 배치해 달라"는
+    # 요청으로 그 트릭을 걷어낸다. 이제 코드 순서 그대로 화면에 보인다:
+    # 위험도 판단(_pick_overlay 안 insight 카드) → 시각 선택 → 지도.
     wind_items = _wind_items(provider)
     overlay, when = _pick_overlay(location, wind_items)
 
@@ -246,36 +251,174 @@ def _pick_overlay(
         return None, None
 
     labels = [datetime.fromisoformat(item["start"]) for item in wind_items]
-
-    # 슬라이더 기본값은 "지금 이후 첫 시각"이다. 예보 원값이 통째로 낡았으면
-    # 마지막 시각을 잡고, 낡았다는 사실을 화면에 적는다.
     now = datetime.now(KST)
     future = [i for i, label in enumerate(labels) if label >= now]
     default_index = future[0] if future else len(labels) - 1
-    if not future:
-        st.caption(
-            f"예보 원값이 {labels[-1]:%m월 %d일 %H시} 까지뿐입니다. "
-            "`python run_serve.py` 로 갱신하면 최신 바람으로 부채꼴이 그려집니다."
-        )
 
-    index = st.select_slider(
-        "부채꼴을 볼 시각",
-        options=list(range(len(wind_items))),
-        value=default_index,
-        format_func=lambda i: f"{labels[i]:%m/%d %H시}",
-        help="이 시각의 예보 바람으로 냄새가 가는 방향을 그립니다. "
-             "슬라이더를 움직이면 부채꼴이 회전합니다.",
-    )
+    # [C] 2026-08-25 "위험도 판단이 맨 위, 그 아래 시각 선택, 맨 아래 지도"
+    # 순서로 다시 바꿔 달라는 요청 — 위험도 카드가 화면 맨 위에 오되, 그
+    # 값은 아래 시각 선택 UI를 다 그린 뒤에야 계산할 수 있다(어떤 pill을
+    # 골랐는지가 있어야 풍향 부채꼴을 계산하므로). st.empty()로 카드 자리를
+    # 먼저 예약해 두고, 시각 선택 UI를 그린 다음 이 자리를 채운다 — 코드
+    # 실행 순서와 화면에 보이는 순서를 분리하는 트릭이다.
+    insight_container = st.empty()
+
+    # [C] 2026-08 시각 하나를 고르는 pill 이 72개(3일×24시간)까지 늘어나
+    # 한 화면에 다 못 들어가고 줄바꿈만 계속됐다. 먼저 날짜 3개 중 하나를
+    # 고르고, 그 날짜 안에서 시간대 6구간(00-04, 04-08, ... 20-24시) 탭을
+    # 고르면, 탭 안에는 그 날짜·그 구간에 속한 시각 4개만 pill로 남는다.
+    #
+    # st.tabs 는 "지금 어느 탭이 열려 있는지"를 파이썬에 알려주지 않는다 —
+    # 모든 탭의 내용이 매 rerun마다 그대로 다시 실행된다(화면에 보이는지만
+    # CSS로 감춘다). 그래서 "선택된 시각"은 탭이 아니라 세션 상태 하나
+    # (loc_selected_idx)로 관리하고, 매 rerun마다 6개 pill 위젯 중 직전
+    # 실행과 값이 달라진 것 하나를 "방금 클릭한 것"으로 판단해 그 값으로
+    # 갱신한다(loc_bucket_prev 가 직전 값 스냅샷). 날짜가 바뀌면 pill의
+    # key 자체를 날짜별로 다르게 줘서, 다른 날짜에 남아있던 선택이 새
+    # 날짜의 탭에 잘못 하이라이트되는 일이 없게 한다.
+    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+
+    def _day_fmt(d) -> str:
+        return f"{d:%m/%d}({weekdays[d.weekday()]})"
+
+    index = st.session_state.get("loc_selected_idx", default_index)
+    if index >= len(labels):
+        index = default_index
+
+    days = sorted({label.date() for label in labels})
+    bucket_titles = ["00-04시", "04-08시", "08-12시", "12-16시", "16-20시", "20-24시"]
+
+    with st.container(border=True):
+        head_col1, head_col2 = st.columns([1, 1])
+        head_col1.markdown("**확인할 시각**")
+        selected_time_ph = head_col2.empty()
+
+        # ── 1단계: 날짜 ──────────────────────────────────────────
+        current_day = labels[index].date()
+        if current_day not in days:
+            current_day = days[0]
+        day_default = days.index(current_day)
+        try:
+            picked_day_i = st.pills(
+                "날짜 선택", options=list(range(len(days))), default=day_default,
+                format_func=lambda i: _day_fmt(days[i]), selection_mode="single",
+                label_visibility="collapsed", key="loc_day_pill",
+            )
+        except AttributeError:
+            picked_day_i = st.radio(
+                "날짜 선택", options=list(range(len(days))), index=day_default,
+                format_func=lambda i: _day_fmt(days[i]), horizontal=True,
+                label_visibility="collapsed", key="loc_day_radio",
+            )
+        if picked_day_i is None:
+            picked_day_i = day_default
+        day_prev = st.session_state.get("loc_day_prev")
+        if day_prev is not None and picked_day_i != day_prev:
+            # 날짜를 막 바꿨다 — 같은 시(hour)를 새 날짜에서 찾아 유지하고,
+            # 없으면(예보 시작·끝단) 그 날짜의 첫 시각으로 넘어간다.
+            target_hour = labels[index].hour
+            same_hour = [i for i, label in enumerate(labels)
+                         if label.date() == days[picked_day_i] and label.hour == target_hour]
+            if same_hour:
+                index = same_hour[0]
+            else:
+                same_day = [i for i, label in enumerate(labels) if label.date() == days[picked_day_i]]
+                if same_day:
+                    index = same_day[0]
+        st.session_state["loc_day_prev"] = picked_day_i
+        current_day = days[picked_day_i]
+
+        # ── 2단계: 시간대 6탭 → 탭 안에 그 날짜의 시각만 pill ──────
+        buckets: dict[int, list[int]] = {b: [] for b in range(6)}
+        for i, label in enumerate(labels):
+            if label.date() == current_day:
+                buckets[label.hour // 4].append(i)
+
+        prev_snapshot = st.session_state.get("loc_bucket_prev", {})
+        new_snapshot: dict[int, int | None] = {}
+        tabs = st.tabs(bucket_titles)
+        for b, tab in enumerate(tabs):
+            with tab:
+                options = buckets.get(b, [])
+                if not options:
+                    st.caption("이 시간대 예보가 없어요.")
+                    new_snapshot[b] = None
+                    continue
+                default_local = index if index in options else None
+                pill_key = f"loc_pill_{current_day.isoformat()}_b{b}"
+                try:
+                    picked = st.pills(
+                        f"{bucket_titles[b]} 시각 선택",
+                        options=options,
+                        default=default_local,
+                        format_func=lambda i: f"{labels[i]:%H시}",
+                        selection_mode="single",
+                        label_visibility="collapsed",
+                        key=pill_key,
+                    )
+                except AttributeError:
+                    picked = st.radio(
+                        f"{bucket_titles[b]} 시각 선택",
+                        options=options,
+                        index=(options.index(index) if index in options else 0),
+                        format_func=lambda i: f"{labels[i]:%H시}",
+                        horizontal=True,
+                        label_visibility="collapsed",
+                        key=f"radio_{pill_key}",
+                    )
+                new_snapshot[b] = picked
+                if picked is not None and picked != prev_snapshot.get(b):
+                    index = picked
+
+        st.session_state["loc_bucket_prev"] = new_snapshot
+        st.session_state["loc_selected_idx"] = index
+        st.caption("시각을 바꾸면 냄새 방향이 바뀌어요.")
+
+    selected_time = labels[index]
+    wd_str = weekdays[selected_time.weekday()]
+    selected_time_ph.markdown(f"<div style='text-align: right; color: #888; font-size: 0.9rem;'>{selected_time:%m/%d}({wd_str}) {selected_time:%H}시</div>", unsafe_allow_html=True)
+
     item = wind_items[index]
     try:
         overlay = plume_overlay(
             location.lat, location.lon,
-            item["wd"], item["ws"], item["sky"], labels[index],
+            item["wd"], item["ws"], item["sky"], selected_time,
         )
     except Exception as exc:
         st.caption(f"부채꼴 계산 실패: {type(exc).__name__}: {exc}")
-        return None, labels[index]
-    return overlay, labels[index]
+        return None, selected_time
+
+    if overlay:
+        def simple_dir(deg: float) -> str:
+            dirs = ["북", "북동", "동", "남동", "남", "남서", "서", "북서", "북"]
+            return dirs[round(deg / 45.0) % 8] + "쪽"
+
+        from_dir = simple_dir(overlay.get("from_deg", 0))
+        to_dir = simple_dir(overlay.get("to_deg", 0))
+        groups = overlay.get("downwind_groups", [])
+
+        if not groups:
+            pill_text = "위험도 낮음"
+            pill_bg, pill_color = "#e2f0e6", "#326941"
+            box_bg, box_border = "#f6faf5", "#c3e2cd"
+            desc = "이 방향엔 가까운 마을이 없어요. (혹시 몰라 더 위험한 마을 기준으로 계산했어요.)"
+        else:
+            pill_text = "위험도 높음"
+            pill_bg, pill_color = "#fbe6e8", "#a63339"
+            box_bg, box_border = "#fff6f7", "#f3c2c5"
+            desc = f"이 방향엔 민원 발생 마을({groups[0]} 등)이 있어요. 주의가 필요합니다."
+
+        html_card = f"""
+        <div style="background-color: {box_bg}; border: 1px solid {box_border}; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+          <span style="background: {pill_bg}; color: {pill_color}; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{pill_text}</span>
+          <div style="margin: 12px 0 8px; font-weight: 700; font-size: 1.05rem; color: #212529;">↓ 바람이 {from_dir}에서 불어와, 냄새는 {to_dir}으로 퍼집니다.</div>
+          <div style="color: #495057; font-size: 0.9rem; margin-bottom: 8px;">{desc}</div>
+          <div style="color: #2b7086; font-size: 0.85rem; font-weight: 600;">이 판단은 작업 시간대 추천에 함께 반영돼요 →</div>
+        </div>
+        """
+        insight_container.markdown(html_card, unsafe_allow_html=True)
+
+    return overlay, selected_time
 
 
 def _draw_map(
@@ -401,39 +544,46 @@ def _manual_input(location: FarmLocation) -> None:
 def _legend(
     location: FarmLocation, overlay: dict[str, Any] | None, when: datetime | None
 ) -> None:
-    """범례와 한 줄 설명. 회색 점선이 '예시 데이터'라는 것을 글로도 못박는다."""
-    items = [
-        (_INK_FARM, "내 농장", "지도 클릭 · GPS · 주소로 정한 위치"),
-        (_INK_RURAL, "농촌근거리", "민원 좌표 중앙값"),
-        (_INK_URBAN, "시가지원거리", "민원 좌표 중앙값"),
-        (_INK_STATION, "측정소(예시)", "실제 익산시 자료 아님"),
-    ]
+    """새로운 3단 레이아웃 범례와 기술 상세 보기(expander)."""
+    items_col1 = [(_INK_FARM, "내 농장", "GPS·주소·지도 클릭으로 정한 위치"),
+                  (_INK_RURAL, "인근 마을 (농촌)", "과거 민원 위치 예시")]
+    
     if overlay:
-        items.append((_INK_PLUME, f"0~{PLUME_MAX_KM:.0f}km 플룸", "유효 반각"))
-        items.append((_INK_SECTOR, f"{PLUME_MAX_KM:.0f}km 밖 섹터", "±30° 노출 지표"))
-    chips = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px;'
-        f'font-size:0.78rem;color:oklch(0.45 0.02 250);">'
-        f'<span style="width:10px;height:10px;border-radius:999px;background:{color};'
-        f'display:inline-block;"></span>{html.escape(name)}'
-        f'<span style="color:oklch(0.62 0.02 250);">· {html.escape(note)}</span></span>'
-        for color, name, note in items
-    )
-    st.markdown(f'<div style="margin:4px 0 8px;">{chips}</div>', unsafe_allow_html=True)
+        items_col2 = [(_INK_PLUME, "냄새가 퍼지는 방향 (3km 이내)", "이 시각 바람 기준으로 계산"),
+                      (_INK_URBAN, "인근 마을 (시가지)", "과거 민원 위치 예시")]
+        items_col3 = [(_INK_SECTOR, "냄새 영향 확장 구간 (3km 밖)", "참고용 추가 범위"),
+                      ("transparent", "측정소 (참고용)", "실제 익산시 자료 아님")]
+    else:
+        items_col2 = [(_INK_URBAN, "인근 마을 (시가지)", "과거 민원 위치 예시")]
+        items_col3 = [("transparent", "측정소 (참고용)", "실제 익산시 자료 아님")]
 
-    lines = [
-        f"위치 {location.lat:.5f}, {location.lon:.5f} · {location.source_label}"
-        + (" · 익산시 안" if location.in_iksan else " · ⚠ 익산시 밖")
-    ]
-    if overlay and when is not None:
-        lines.append(f"{when:%m월 %d일 %H시} 기준 — " + describe_overlay(overlay))
-        if overlay["downwind_groups"]:
-            lines.append(
-                "이 시각에는 위 유형의 위험도를 골라 추천 순위를 매깁니다. "
-                "플룸은 유형을 고르기만 하고 점수·등급은 바꾸지 않습니다."
-            )
-    st.markdown(
-        '<div class="note-box">' + "<br>".join(html.escape(line) for line in lines)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
+    cols = st.columns(3)
+    for i, col_items in enumerate([items_col1, items_col2, items_col3]):
+        with cols[i]:
+            for color, name, note in col_items:
+                border = "1.5px dashed #aaa" if name.startswith("측정소") else "none"
+                bg = "transparent" if name.startswith("측정소") else color
+                st.markdown(f"""
+                <div style="display:flex; align-items:flex-start; margin-bottom: 12px; gap: 8px;">
+                    <div style="width:12px; height:12px; border-radius:50%; background:{bg}; border:{border}; margin-top: 4px; flex-shrink:0;"></div>
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.85rem; color: #333; line-height: 1.2;">{html.escape(name)}</div>
+                        <div style="font-size: 0.75rem; color: #888; margin-top: 2px;">{html.escape(note)}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    with st.expander("ℹ️ 기술 상세 보기 (좌표 · 풍향 · 대기안정도 원자료)"):
+        lines = [
+            f"위치 {location.lat:.5f}, {location.lon:.5f} · {location.source_label}"
+            + (" · 익산시 안" if location.in_iksan else " · ⚠ 익산시 밖")
+        ]
+        if overlay and when is not None:
+            lines.append(f"{when:%m월 %d일 %H시} 기준 — " + describe_overlay(overlay))
+            if overlay["downwind_groups"]:
+                lines.append(
+                    "이 시각에는 위 유형의 위험도를 골라 추천 순위를 매깁니다. "
+                    "플룸은 유형을 고르기만 하고 점수·등급은 바꾸지 않습니다."
+                )
+        st.markdown("<br>".join(html.escape(line) for line in lines), unsafe_allow_html=True)
