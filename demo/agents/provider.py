@@ -63,5 +63,7 @@ def create_provider(
     if mode == "legacy":
         from agents.legacy_provider import LegacyProvider
 
-        return LegacyProvider(rag_index=rag_index)
+        # storage_days 를 빠뜨리면 사이드바 「분뇨 저장 경과일」이 legacy 모드에서만
+        # 무동작이 된다 (바로 위 fixture 분기는 처음부터 넘기고 있었다).
+        return LegacyProvider(rag_index=rag_index, storage_days=storage_days)
     raise ValueError("D_PROVIDER_MODE는 fixture 또는 legacy여야 합니다.")

@@ -33,6 +33,10 @@ class LegacyProvider:
     def __init__(self, *, rag_index: Any = None, storage_days: int | None = None) -> None:
         self.rag = rag_index
         self.generated_at = datetime.now(KST).isoformat(timespec="seconds")
+        # 화면 사이드바의 「분뇨 저장 경과일」 값이다. 여기 담아 두지 않으면
+        # get_storage_days() 가 참조할 곳이 없어 슬라이더가 무동작이 된다
+        # (아래 메서드 주석 참조). fixture_provider 는 처음부터 이렇게 하고 있다.
+        self.storage_days = storage_days
 
     def _source(
         self, state: str, name: str, *limitations: str, version: str | None = None
@@ -238,17 +242,52 @@ class LegacyProvider:
         )
 
     def get_storage_days(self, farm_id: str) -> dict[str, Any]:
+        """분뇨 저장 경과일. DB 의 실제 반출일이 있으면 그쪽이 우선한다.
+
+        [2026-08-25] 버그 두 개를 함께 고쳤다.
+
+        ① 화면 슬라이더가 아무 일도 안 하고 있었다.
+           dashboard.py 는 create_provider(storage_days=슬라이더값) 으로 값을
+           넘기는데 __init__ 이 그걸 받기만 하고 버렸고, 이 메서드는 DB 의
+           last_manure_removal_date 만 봤다. 그 컬럼이 None 이라(데모 농가는
+           반출 이력이 없다) days 가 항상 None → storage_factor(None)=1.0 이었다.
+           실측: 슬라이더를 0/12/20/30 으로 바꿔도 추천 점수가 1.0163 로 동일.
+           화면 상단 배너는 "분뇨 저장 30일 경과 기준"이라고 적으면서 계산은
+           "모름"으로 하고 있었다 — 표시와 계산이 어긋난 상태였다.
+           fixture_provider 는 처음부터 self.storage_days 를 그대로 돌려주므로,
+           같은 슬라이더가 모드에 따라 먹었다 안 먹었다 했다.
+
+        ② datetime.now() 에 시간대가 없었다.
+           Streamlit Cloud 컨테이너는 UTC 다. 마지막 반출일이 08-13 이고
+           실제 시각이 08-25 08:00 KST(=08-24 23:00 UTC)이면 로컬은 12일,
+           배포는 11일로 하루 밀린다. storage_factor 는 14일에서 1.0→1.5 로
+           끊기는 계단 함수라 경계일 새벽에 로컬과 배포가 다른 값을 낸다.
+
+        우선순위를 DB 우선으로 둔 이유는, 실제 반출 이력이 들어오는 순간
+        사용자 입력보다 그쪽이 정확하기 때문이다. 어느 쪽을 썼는지는
+        days_origin 과 source.limitations 에 남겨 화면에서 구분되게 한다
+        (폴백을 탔다는 사실은 반드시 표시한다는 이 저장소의 규약).
+        """
         farm = self._farm_row(farm_id)
-        if not farm or not farm.get("last_manure_removal_date"):
-            days = None
+        removal_date = (farm or {}).get("last_manure_removal_date")
+        if removal_date:
+            days = (datetime.now(KST).date()
+                    - datetime.strptime(removal_date, "%Y-%m-%d").date()).days
+            origin = "farm_config"
+            note = f"farm_config 의 마지막 반출일 {removal_date} 기준"
+        elif self.storage_days is not None:
+            days = int(self.storage_days)
+            origin = "user_input"
+            note = "farm_config 에 마지막 반출일이 없어 화면 입력값을 사용"
         else:
-            days = (datetime.now() - datetime.strptime(
-                farm["last_manure_removal_date"], "%Y-%m-%d")).days
+            days = None
+            origin = "unknown"
+            note = "반출일도 입력값도 없어 저장 가중치를 적용하지 않음(1.0)"
         return self._response(
-            "ok", {"farm_id": farm_id, "days": days,
+            "ok", {"farm_id": farm_id, "days": days, "days_origin": origin,
                    "over_2weeks": bool(days is not None and days >= 14),
                    "days_until_threshold": None if days is None else max(0, 14 - days)},
-            self._source("connected", "B farm_config",
+            self._source("connected", "B farm_config", note,
                          "14일 기준과 1.5배 가중치는 잠정 가정값 [C]"),
         )
 
