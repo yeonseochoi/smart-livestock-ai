@@ -45,6 +45,62 @@ PAGE_MARKER_RE = re.compile(r"(?m)^##\s*(\d+)쪽\s*$\n?")
 # 따로 갖고 있으므로, 본문에 숫자만 있는 줄이 남으면 청크 텍스트만 지저분해진다.
 _LEADING_PAGE_NUMBER_RE = re.compile(r"^\s*\d{1,4}\s*\n")
 
+# [C] 2026-08-26: PDF에서 뽑은 줄바꿈은 대부분 "문단 구분"이 아니라 그냥 화면
+# 폭에 맞춘 "시각적 줄바꿈"이라 문장 중간 아무 데서나 나온다. 2차 글자수 분할
+# (_manual_fallback_splitter/_law_fallback_splitter)의 구분자 우선순위가
+# ["\n\n", "\n", ". ", "다. ", ...] 순서인데, "\n"이 "다. "(문장 종결)보다
+# 먼저 시도되다 보니 PDF가 문장 중간에서 줄을 바꾼 지점을 그대로 청크 경계로
+# 써버린다. 실제로 "축산악취 관리 지침서.pdf 제2장 (2)" 청크가 "수 있다. ·..."로
+# 시작하는 문제로 확인됨 — 원래 문장 "...예방할 수 있다."이 줄바꿈에서 반으로
+# 잘려 뒷부분만 다음 청크 맨 앞에 남은 것이다. 진짜 문단 구분("\n\n", 빈 줄)은
+# 그대로 두고, 홑 줄바꿈만 공백으로 펴서 "\n"이 더는 문장 중간을 끊는 분리자로
+# 안 쓰이게 한다.
+_SINGLE_NEWLINE_RE = re.compile(r"(?<!\n)\n(?!\n)")
+
+# [C] 2026-08-26 추가: 위 처리로 문장 중간 줄바꿈은 없앴지만, 그러면서 "▪ 항목1
+# ∙ 세부내용 ▪ 항목2 ∙ 세부내용"처럼 원래 줄이 나뉘어 있던 목록 항목까지 전부
+# 한 줄로 뭉쳐져 근거카드가 읽기 어려운 한 덩어리 글이 됐다("수 있다"류 버그를
+# 고치다 보니 이번엔 가독성이 나빠짐). 줄바꿈 바로 다음이 목록 기호로 시작하면
+# 그건 문장 중간이 아니라 진짜 항목 구분이므로, 그 줄바꿈만은 살려서 화면에
+# 항목별로 줄이 나뉘어 보이게 한다("축산악취 관리 지침서.pdf"에서 실제 쓰인
+# 기호 ▪·∙ 기준으로 확인함, 법령의 ①~⑳·가./나.·(1)/(2)·1./2.도 같이 잡는다).
+_BULLET_LINE_RE = re.compile(
+    r"^(▪|∙|•|◦|－|\(\d{1,2}\)|\d{1,2}[.)]\s|[가-하][.)]\s|[①-⑳])"
+)
+
+
+def _flatten_wraps(text: str) -> str:
+    """PDF의 시각적 줄바꿈을 정리해 문장은 안 끊기고 목록 구조는 남긴다.
+
+    문단 구분("\\n\\n")은 그대로 둔다. 홑 줄바꿈은 원칙적으로 공백으로 펴서
+    문장 중간에서 청크가 잘리지 않게 하되, 줄바꿈 다음이 목록 기호로 시작하면
+    그 줄바꿈은 항목 구분이므로 살려 둔다(화면 표시는 st.text가 줄바꿈을
+    그대로 보여준다). 이 함수는 소제목/조문 경계로 이미 나뉜 섹션 텍스트에만
+    쓴다 — 원문 전체(full_text)에 쓰면 HEADING_RE가 줄 단위로 소제목을 찾는
+    로직이 깨진다.
+    """
+
+    def _replace(match: re.Match) -> str:
+        rest = text[match.end():]
+        return "\n" if _BULLET_LINE_RE.match(rest) else " "
+
+    return _SINGLE_NEWLINE_RE.sub(_replace, text).strip()
+
+
+# [C] 2026-08-26 추가: 위 두 수정 이후에도 2차 글자수 분할의 overlap(겹침) 구간이
+# 조각 경계에서 앞 조각 문장의 마침표·불릿만 살짝 걸쳐 남기는 경우가 있었다
+# (실제 확인: "축산악취 관리 지침서.pdf 제2장 (2)"가 ". · 축사 외부로..."로 시작,
+# "제1장 (2)"가 ". · 또한, 축사..."로 시작 — 둘 다 앞 조각 끝의 "다. ·" 잔재만
+# 남고 실제 내용은 그 다음부터 시작함). 진짜 문장·목록 항목은 마침표·가운뎃점만
+# 으로 시작하지 않으므로 안전하게 지울 수 있다.
+_LEADING_DEBRIS_RE = re.compile(r"^[\s\.,·•\-–—]+")
+
+
+def _strip_split_debris(text: str) -> str:
+    """2차 분할의 overlap 경계에 남는 자투리 문장부호를 앞에서 지운다."""
+    return _LEADING_DEBRIS_RE.sub("", text)
+
+
 MIN_CHUNK_LEN = 40
 MANUAL_CHUNK_SIZE = 700       # ko-sroberta 등 임베딩 모델 토큰 한계를 고려한 보수적 값
 MANUAL_CHUNK_OVERLAP = 80
@@ -179,15 +235,16 @@ def chunk_law_document(source_file: str, page_docs: list[Document]) -> list[Docu
 
     chunks = []
     for pos, end in zip(starts, starts[1:] + [len(full_text)]):
-        text = full_text[pos:end].strip()
-        if len(text) < MIN_CHUNK_LEN:
+        raw_text = full_text[pos:end].strip()
+        if len(raw_text) < MIN_CHUNK_LEN:
             continue
-        first_line = text.splitlines()[0].strip()[:80]
+        first_line = raw_text.splitlines()[0].strip()[:80]
         article_m = re.match(r"제\s*\d+\s*조(?:의\s*\d+)?", first_line)
         annex_m = re.match(r"\[?별표\s*\d+(?:의\s*\d+)?\]?", first_line)
         unit = (annex_m or article_m).group(0) if (annex_m or article_m) else "서문"
         page = _page_for_offset(spans, pos)
         is_annex = bool(annex_m)
+        text = _flatten_wraps(raw_text)
 
         if len(text) <= LAW_SPLIT_THRESHOLD:
             chunks.append(Document(
@@ -206,6 +263,8 @@ def chunk_law_document(source_file: str, page_docs: list[Document]) -> list[Docu
             # 표 형태의 별표 등)만 여기서 글자수 기준으로 보조 분할한다. label에
             # (i+1)을 붙여 어느 조문의 몇 번째 조각인지 출처에서 바로 알 수 있게 한다.
             for i, piece in enumerate(_law_fallback_splitter.split_text(text)):
+                if i > 0:
+                    piece = _strip_split_debris(piece)
                 chunks.append(Document(
                     page_content=piece,
                     metadata={
@@ -242,13 +301,14 @@ def chunk_manual_document(source_file: str, page_docs: list[Document]) -> list[D
         sections.append((heading, start, "".join(buf)))
 
     chunks = []
-    for heading, start_offset, text in sections:
-        text = text.strip()
-        if len(text) < MIN_CHUNK_LEN:
+    for heading, start_offset, raw_text in sections:
+        raw_text = raw_text.strip()
+        if len(raw_text) < MIN_CHUNK_LEN:
             continue
         page = _page_for_offset(spans, start_offset)
 
         label = _clean_heading_label(heading)
+        text = _flatten_wraps(raw_text)
 
         if len(text) <= MANUAL_SPLIT_THRESHOLD:
             chunks.append(Document(
@@ -265,6 +325,8 @@ def chunk_manual_document(source_file: str, page_docs: list[Document]) -> list[D
             # (섹션 앞부분 헤딩을 그대로 물려받지만 그 사이 다른 내용으로 흘러갔을 수 있음),
             # label을 이미 정직하게 정리해둔 값으로 통일해서 쓴다.
             for i, piece in enumerate(_manual_fallback_splitter.split_text(text)):
+                if i > 0:
+                    piece = _strip_split_debris(piece)
                 chunks.append(Document(
                     page_content=piece,
                     metadata={

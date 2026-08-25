@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from agents.contracts import SensorObservation
 from config import DEMO_FARM
 from serving import db
 
@@ -77,11 +78,62 @@ class LegacyProvider:
         )
 
     def get_sensor_snapshot(self, at: str | None = None) -> dict[str, Any]:
+        """익산악취24 원자료 adapter가 아직 없어 발표용 고정 시연값을 쓴다.
+
+        [C] 2026-08-26: 공식 파일·코드북 도착 전까지 이 메서드만 실측 adapter로
+        바꾸면 되도록 반환 계약(SensorObservation)은 그대로 두고 값만 고정한다.
+        "연결 실패를 조용히 다른 데이터로 대체하지 않는다"는 이 파일의 원칙과
+        다르지 않다 — 이건 실패를 감추는 게 아니라 원래 없는 기능을 발표용으로
+        명시적으로 채운 것이라, source.state를 "fixture"로 정직하게 표시해
+        화면에서 CONNECTED와 구분되게 한다.
+        """
+        observed = datetime.now(KST).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+        ingested = observed + timedelta(minutes=5)
+        raw = (
+            ("S-DEMO-01", "익산 왕궁 측정소(예시)", 35.9518, 126.9574,
+             0.001, 0.002, 0.191, 1.8, 30.7, 58.9, "동남동", 2.2, "unverified"),
+            ("S-DEMO-02", "익산 춘포 측정소(예시)", 35.9587, 126.9880,
+             0.002, 0.004, 0.224, 2.1, 30.2, 61.4, "남동", 1.7, "unverified"),
+            ("S-DEMO-03", "익산 삼기 측정소(예시)", 35.9460, 127.0140,
+             None, None, None, None, 29.8, 60.1, "동남동", 2.4, "missing"),
+        )
+        stations = []
+        for row in raw:
+            station = SensorObservation(
+                observation_id=f"{row[0]}:{observed.isoformat()}",
+                station_id=row[0],
+                station_name=row[1],
+                latitude=row[2],
+                longitude=row[3],
+                observed_at=observed.isoformat(),
+                ingested_at=ingested.isoformat(),
+                h2s_ppm=row[4],
+                nh3_ppm=row[5],
+                tvoc_ppm=row[6],
+                complex_odor_value=row[7],
+                complex_odor_unit=None,
+                temperature_c=row[8],
+                humidity_pct=row[9],
+                wind_direction_text=row[10],
+                wind_speed_ms=row[11],
+                record_qc=row[12],
+                quality_flags=("fixture", "presentation_placeholder"),
+            )
+            stations.append(station.to_dict())
         return self._response(
-            "unavailable", None,
-            self._source("unavailable", "익산시 측정소 adapter 미연결",
-                         "공식 파일과 코드북 도착 후 구현"),
-            "현재 C/B 데모에는 익산악취24 측정소 원자료가 없습니다.",
+            "ok",
+            {
+                "schema_version": "sensor-observation-v1",
+                "requested_at": at,
+                "observed_at": observed.isoformat(),
+                "stations": stations,
+            },
+            self._source(
+                "fixture", "익산악취24 예상 스키마 · 발표용 고정값",
+                "측정소명·좌표·수치는 실제 익산시 자료가 아님",
+                "공식 파일과 코드북 도착 후 실측 adapter로 교체 예정",
+                version="presentation-fixture-v1",
+            ),
         )
 
     def get_risk_calendar(
